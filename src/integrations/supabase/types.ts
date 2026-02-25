@@ -14,48 +14,7 @@ export type Database = {
   }
   public: {
     Tables: {
-      rooms: {
-        Row: {
-          created_at: string | null
-          id: string
-          is_public: boolean | null
-          method: string | null
-          ml_analysis: Json | null
-          ml_context: Json | null
-          name: string
-          scene: Json | null
-          thumbnail_url: string | null
-          updated_at: string | null
-          user_id: string
-        }
-        Insert: {
-          created_at?: string | null
-          id: string
-          is_public?: boolean | null
-          method?: string | null
-          ml_analysis?: Json | null
-          ml_context?: Json | null
-          name: string
-          scene?: Json | null
-          thumbnail_url?: string | null
-          updated_at?: string | null
-          user_id: string
-        }
-        Update: {
-          created_at?: string | null
-          id?: string
-          is_public?: boolean | null
-          method?: string | null
-          ml_analysis?: Json | null
-          ml_context?: Json | null
-          name?: string
-          scene?: Json | null
-          thumbnail_url?: string | null
-          updated_at?: string | null
-          user_id?: string
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Views: {
       [_ in never]: never
