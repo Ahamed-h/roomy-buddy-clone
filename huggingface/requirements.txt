@@ -1,0 +1,37 @@
+# Core
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+Pillow==10.1.0
+
+# PyTorch (CUDA 11.8)
+torch==2.1.0
+torchvision==0.16.0
+torchaudio==2.1.0
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# Object Detection
+ultralytics==8.0.200
+
+# Transformers (OWL-ViT, CLIP)
+transformers==4.35.2
+open-clip-torch==2.23.0
+
+# Segment Anything
+segment-anything @ git+https://github.com/facebookresearch/segment-anything.git
+
+# Depth Estimation
+timm==0.9.12
+
+# TensorFlow (for trait model)
+tensorflow==2.15.0
+
+# Image processing
+opencv-python-headless==4.8.1.78
+scipy==1.11.4
+numpy==1.24.4
+scikit-image==0.22.0
+
+# Utilities
+tqdm==4.66.1
+requests==2.31.0
