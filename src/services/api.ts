@@ -1,6 +1,6 @@
 // API service for HF Spaces and edge functions
 
-const DEFAULT_HF_URL = "https://your-space.hf.space";
+const DEFAULT_HF_URL = "http://localhost:7860";
 
 export function getHfSpacesUrl(): string {
   return localStorage.getItem("roomform_hf_url") || DEFAULT_HF_URL;

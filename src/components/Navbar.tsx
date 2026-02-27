@@ -21,7 +21,7 @@ export function Navbar() {
       <div className="container flex h-16 items-center justify-between">
         <Link to="/" className="flex items-center gap-2 font-display text-xl font-bold">
           <Box className="h-6 w-6 text-primary" />
-          <span>roomform<span className="text-primary">.ai</span></span>
+          <span>aivo<span className="text-primary">.ai</span></span>
         </Link>
 
         {/* Desktop nav */}

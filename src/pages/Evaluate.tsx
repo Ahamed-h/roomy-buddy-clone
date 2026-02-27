@@ -54,8 +54,8 @@ const Evaluate = () => {
       const data = await analyzeRoom(image);
       setResult(data);
       // Store for Design Studio
-      sessionStorage.setItem("roomform_analysis", JSON.stringify(data));
-      if (imagePreview) sessionStorage.setItem("roomform_image", imagePreview);
+      sessionStorage.setItem("aivo_analysis", JSON.stringify(data));
+      if (imagePreview) sessionStorage.setItem("aivo_image", imagePreview);
       toast({ title: "Analysis complete!", description: "Your room has been evaluated." });
     } catch {
       toast({
@@ -64,8 +64,8 @@ const Evaluate = () => {
       });
       const mock = getMockResult();
       setResult(mock);
-      sessionStorage.setItem("roomform_analysis", JSON.stringify(mock));
-      if (imagePreview) sessionStorage.setItem("roomform_image", imagePreview);
+      sessionStorage.setItem("aivo_analysis", JSON.stringify(mock));
+      if (imagePreview) sessionStorage.setItem("aivo_image", imagePreview);
     } finally {
       setLoading(false);
     }
@@ -106,19 +106,19 @@ const Evaluate = () => {
         {showSettings && (
           <Card className="mb-6">
             <CardContent className="pt-6">
-              <label className="text-sm font-medium">HF Spaces API URL</label>
+              <label className="text-sm font-medium">Local ML Server URL</label>
               <div className="mt-2 flex gap-2">
                 <Input
                   value={hfUrl}
                   onChange={(e) => setHfUrl(e.target.value)}
-                  placeholder="https://your-space.hf.space"
+                  placeholder="http://localhost:7860"
                 />
                 <Button onClick={() => { setHfSpacesUrl(hfUrl); toast({ title: "Saved!" }); }}>
                   Save
                 </Button>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Enter your Hugging Face Spaces URL. See the About page for deployment instructions.
+                Your local ML server URL. Default: http://localhost:7860. See the About page for setup instructions.
               </p>
             </CardContent>
           </Card>
@@ -173,7 +173,7 @@ const Evaluate = () => {
                   const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
-                  a.href = url; a.download = "roomform-analysis.json"; a.click();
+                  a.href = url; a.download = "aivo-analysis.json"; a.click();
                 }}>
                   <Download className="mr-2 h-4 w-4" /> Download JSON
                 </Button>

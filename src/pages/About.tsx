@@ -17,7 +17,7 @@ const fadeUp = {
 const models = [
   { icon: Eye, name: "YOLO v26n", desc: "Real-time object detection for furniture & room elements" },
   { icon: Eye, name: "OWL-ViT", desc: "Open-vocabulary detection for interior-specific objects (bed, sofa, chair, table, lamp, window, rug, cabinet)" },
-  { icon: Layers, name: "SAM (vit_h)", desc: "Segment Anything Model — high-quality segmentation masks" },
+  { icon: Layers, name: "SAM (vit_b)", desc: "Segment Anything Model — lightweight segmentation masks optimized for CPU" },
   { icon: Palette, name: "CLIP (ViT-B/32)", desc: "Zero-shot material classification (wood, fabric, metal, glass, marble, plastic)" },
   { icon: Ruler, name: "MiDaS (small)", desc: "Monocular depth estimation for spatial understanding" },
   { icon: Sparkles, name: "Custom ViT Aesthetic", desc: "FeaturePredictor (vit_small_patch16_224) + RankingModel → 13 metrics + overall aesthetic score" },
@@ -30,7 +30,7 @@ const models = [
 const steps = [
   {
     num: "01", title: "Upload Your Room",
-    desc: "Take a photo of any room. Supports JPG/PNG up to 10MB. The image is sent to your ML pipeline on HF Spaces."
+    desc: "Take a photo of any room. Supports JPG/PNG up to 10MB. The image is sent to your local ML server."
   },
   {
     num: "02", title: "AI Evaluates & Scores",
@@ -46,15 +46,15 @@ const steps = [
   },
 ];
 
-const hfSteps = [
-  "Create a free Hugging Face account at huggingface.co",
-  "Click \"New Space\" → Name it (e.g., roomform-api)",
-  "Select SDK: \"Docker\" → Hardware: \"T4 GPU (free)\"",
-  "Upload the files from the huggingface/ folder in this project",
-  "Upload your model weights to the models/ folder in the Space",
-  "Wait for the Space to build (5-10 minutes first time)",
-  "Copy your Space URL — it looks like: https://your-name-roomform-api.hf.space",
-  "Paste the URL in the Evaluate page settings",
+const localSteps = [
+  "Install Python 3.10+ on your machine",
+  "Navigate to the local_server/ folder in this project",
+  "Run: pip install -r requirements.txt (CPU-only, ~2GB download)",
+  "Place your model weights in the models/ directory",
+  "Run: python -m uvicorn app:app --host 0.0.0.0 --port 7860",
+  "Wait for models to load (~30 seconds on first run)",
+  "The API is ready at http://localhost:7860",
+  "Go to the Evaluate page — it auto-connects to localhost:7860",
 ];
 
 const About = () => {
@@ -70,7 +70,7 @@ const About = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            About roomform<span className="text-primary">.ai</span>
+            About aivo<span className="text-primary">.ai</span>
           </motion.h1>
           <motion.p
             className="mx-auto mt-4 max-w-2xl text-lg text-muted-foreground"
@@ -112,7 +112,7 @@ const About = () => {
         <div className="container">
           <h2 className="mb-4 text-center font-display text-3xl font-bold">AI Models & Algorithms</h2>
           <p className="mx-auto mb-12 max-w-2xl text-center text-muted-foreground">
-            These are the actual models running on your Hugging Face Spaces backend — not proxied through Gemini.
+            These are the actual models running on your local server — optimized for CPU inference.
           </p>
           <div className="grid gap-4 md:grid-cols-2">
             {models.map((m, i) => (
@@ -143,13 +143,13 @@ const About = () => {
         <div className="container max-w-3xl">
           <div className="flex items-center gap-3 mb-8">
             <Server className="h-6 w-6 text-primary" />
-            <h2 className="font-display text-3xl font-bold">Deploy to Hugging Face Spaces</h2>
+            <h2 className="font-display text-3xl font-bold">Local Server Setup</h2>
           </div>
           <p className="mb-8 text-muted-foreground">
-            Your ML models run on HF Spaces with a free T4 GPU. Follow these steps to deploy:
+            Your ML models run locally on your machine — no GPU required. Follow these steps:
           </p>
           <ol className="space-y-4">
-            {hfSteps.map((step, i) => (
+            {localSteps.map((step, i) => (
               <motion.li
                 key={i}
                 className="flex gap-4 rounded-lg border border-border bg-card p-4"

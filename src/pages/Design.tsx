@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, Suspense } from "react";
+import { useState, useRef, useCallback, Suspense, useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid, Environment, Html, TransformControls } from "@react-three/drei";
 import { Button } from "@/components/ui/button";
@@ -12,10 +12,11 @@ import {
   Upload, Search, ShoppingCart, Box, Maximize2, Minimize2,
   MessageCircle, X, Send, ChevronUp, ChevronDown,
   Eye, Move3D, Hand, Ruler, Layers, Lock, Copy, ExternalLink,
-  Image as ImageIcon, Sparkles, RotateCcw
+  Image as ImageIcon, Sparkles, RotateCcw, Loader2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import * as THREE from "three";
+import type { AnalysisResult } from "@/services/api";
 
 // Types
 interface FurnitureItem {
@@ -126,7 +127,8 @@ function Scene({
   );
 }
 
-// Main Component
+const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/design-chat`;
+
 const Design = () => {
   const { toast } = useToast();
   const [furniture, setFurniture] = useState<FurnitureItem[]>([]);
@@ -137,9 +139,25 @@ const Design = () => {
     { role: "assistant", content: "Hi! I'm RoomBot 🤖 I can help you design your room. Upload a photo, add furniture, or ask me for layout advice." },
   ]);
   const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
   const [rightTab, setRightTab] = useState("add");
   const [searchQuery, setSearchQuery] = useState("");
+  const [roomContext, setRoomContext] = useState<AnalysisResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem("aivo_analysis");
+      if (stored) {
+        const data = JSON.parse(stored) as AnalysisResult;
+        setRoomContext(data);
+        setChatMessages(prev => [...prev, {
+          role: "assistant",
+          content: `I loaded your room evaluation! Score: ${data.aesthetic_score.toFixed(1)}/10, style: ${data.top_styles?.[0]?.style || "mixed"}. I'll use this for personalized advice.`
+        }]);
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   const selectedItem = furniture.find((f) => f.id === selectedId);
 
@@ -177,30 +195,87 @@ const Design = () => {
     });
   };
 
-  const handleChatSend = () => {
-    if (!chatInput.trim()) return;
-    const userMsg: ChatMessage = { role: "user", content: chatInput };
-    setChatMessages((prev) => [...prev, userMsg]);
-    setChatInput("");
+  const parseFurnitureFromResponse = (text: string) => {
+    const match = text.match(/```furniture\s*\n([\s\S]*?)```/);
+    if (match) {
+      try { addFurniture(JSON.parse(match[1])); } catch { /* ignore */ }
+    }
+  };
 
-    // Simple demo responses
-    setTimeout(() => {
-      let response = "I'd be happy to help! For full AI chat, connect your Lovable Cloud backend.";
-      const lower = chatInput.toLowerCase();
-      if (lower.includes("sofa") || lower.includes("couch")) {
-        response = "I'd suggest placing a sofa against the far wall. Let me add one for you!";
-        addFurniture({ name: "Sofa", width: 200, height: 85, depth: 90, color: "#6B7B8D", material: "fabric" });
-      } else if (lower.includes("table")) {
-        response = "A coffee table would work well in the center. Adding one now!";
-        addFurniture({ name: "Coffee Table", width: 120, height: 45, depth: 60, color: "#8B6914", material: "wood" });
-      } else if (lower.includes("lamp")) {
-        response = "A floor lamp would add warmth. Placing one in the corner.";
-        addFurniture({ name: "Floor Lamp", width: 30, height: 160, depth: 30, color: "#C0C0C0", material: "metal" });
-      } else if (lower.includes("render")) {
-        response = "To generate a photorealistic render, connect Lovable Cloud with Gemini. Click the Render button in the toolbar!";
+  const handleChatSend = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const userMsg: ChatMessage = { role: "user", content: chatInput };
+    const newMessages = [...chatMessages, userMsg];
+    setChatMessages(newMessages);
+    setChatInput("");
+    setChatLoading(true);
+
+    let assistantSoFar = "";
+    try {
+      const resp = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          roomContext: roomContext || undefined,
+        }),
+      });
+
+      if (!resp.ok || !resp.body) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || `Error ${resp.status}`);
       }
-      setChatMessages((prev) => [...prev, { role: "assistant", content: response }]);
-    }, 600);
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let textBuffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line.startsWith(":") || line.trim() === "") continue;
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === "[DONE]") break;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            if (content) {
+              assistantSoFar += content;
+              setChatMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant" && prev.length === newMessages.length + 1) {
+                  return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: assistantSoFar } : m);
+                }
+                return [...prev, { role: "assistant", content: assistantSoFar }];
+              });
+            }
+          } catch {
+            textBuffer = line + "\n" + textBuffer;
+            break;
+          }
+        }
+      }
+      parseFurnitureFromResponse(assistantSoFar);
+    } catch (e: any) {
+      console.error("Chat error:", e);
+      setChatMessages(prev => [...prev, {
+        role: "assistant",
+        content: `Sorry, I couldn't connect. ${e.message || "Please try again."}`
+      }]);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const presetFurniture = [
@@ -225,7 +300,7 @@ const Design = () => {
         <div className="flex items-center gap-1">
           <a href="/" className="mr-3 flex items-center gap-1.5 font-display text-sm font-bold">
             <Box className="h-4 w-4 text-studio-accent" />
-            <span>roomform</span>
+            <span>aivo</span>
           </a>
           <Button variant="ghost" size="sm" className="h-8 text-xs text-studio-text-muted hover:text-studio-text">
             <Plus className="mr-1 h-3 w-3" /> New
@@ -568,8 +643,8 @@ const Design = () => {
                 onKeyDown={(e) => e.key === "Enter" && handleChatSend()}
                 className="h-8 border-studio-border bg-studio-bg text-xs text-studio-text placeholder:text-studio-text-muted"
               />
-              <Button size="sm" className="h-8 bg-studio-accent hover:bg-studio-accent/90" onClick={handleChatSend}>
-                <Send className="h-3 w-3" />
+              <Button size="sm" className="h-8 bg-studio-accent hover:bg-studio-accent/90" onClick={handleChatSend} disabled={chatLoading}>
+                {chatLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
               </Button>
             </div>
           </div>

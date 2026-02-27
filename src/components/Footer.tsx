@@ -9,10 +9,10 @@ export function Footer() {
           <div className="space-y-4">
             <Link to="/" className="flex items-center gap-2 font-display text-lg font-bold">
               <Box className="h-5 w-5 text-primary" />
-              <span>roomform<span className="text-primary">.ai</span></span>
+              <span>aivo<span className="text-primary">.ai</span></span>
             </Link>
             <p className="text-sm text-muted-foreground">
-              AI-powered interior design evaluation and 3D room planning.
+              AI-powered interior design evaluation, 3D room planning, and furniture shopping.
             </p>
           </div>
           <div>
@@ -37,7 +37,7 @@ export function Footer() {
           </div>
         </div>
         <div className="mt-8 border-t border-border pt-6 text-center text-xs text-muted-foreground">
-          © {new Date().getFullYear()} roomform.ai — All rights reserved.
+          © {new Date().getFullYear()} aivo.ai — All rights reserved.
         </div>
       </div>
     </footer>

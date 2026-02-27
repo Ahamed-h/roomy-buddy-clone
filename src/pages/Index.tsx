@@ -66,7 +66,7 @@ const steps = [
 const faqs = [
   {
     q: "What AI models power the evaluation?",
-    a: "We use YOLO v26n for object detection, OWL-ViT for open-vocabulary detection, CLIP for material classification, MiDaS for depth estimation, a custom ViT model for aesthetic scoring, and a TensorFlow model for style trait prediction. All running on Hugging Face Spaces with a free T4 GPU.",
+    a: "We use YOLO v26n for object detection, OWL-ViT for open-vocabulary detection, CLIP for material classification, MiDaS for depth estimation, a custom ViT model for aesthetic scoring, and a TensorFlow model for style trait prediction. Runs locally on your machine.",
   },
   {
     q: "Is the furniture real or placeholder?",
@@ -78,11 +78,11 @@ const faqs = [
   },
   {
     q: "Is this free to use?",
-    a: "The ML models run on Hugging Face Spaces free tier (T4 GPU). The frontend is completely free. Some AI features like rendering use Gemini API which has generous free tiers.",
+    a: "The ML models run locally on your machine — no cloud GPU needed. The frontend is completely free. AI chat features use Gemini via Lovable AI which has generous free tiers.",
   },
   {
     q: "Who created this?",
-    a: "Roomform.ai was created by Ahamed H (220071601018) and Aashif M (220071601003).",
+    a: "aivo.ai was created by Ahamed H (220071601018) and Aashif M (220071601003).",
   },
 ];
 
@@ -104,7 +104,7 @@ const Index = () => {
           >
             <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-xs font-medium text-primary">
               <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Beta · Patent Pending
+              AI-Powered Design Studio
             </span>
             <h1 className="mt-4 font-display text-5xl font-bold leading-tight tracking-tight md:text-7xl">
               3D design
@@ -135,7 +135,7 @@ const Index = () => {
           >
             <img
               src="/images/design-studio-preview.png"
-              alt="Roomform.ai Design Studio preview showing 3D room layout editor"
+              alt="aivo.ai Design Studio preview showing 3D room layout editor"
               className="w-full"
               loading="lazy"
             />
