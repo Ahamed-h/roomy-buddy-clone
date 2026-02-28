@@ -2,10 +2,9 @@ import { useState } from "react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent } from "@/components/ui/card";
 import { Paintbrush, Box } from "lucide-react";
 import Design2DTab from "@/components/design/Design2DTab";
-import BasicRoomViewer from "@/components/design/BasicRoomViewer";
+import Studio3DEditor from "@/components/design/studio3d/Studio3DEditor";
 
 const Design = () => {
   const [activeTab, setActiveTab] = useState("2d");
@@ -38,14 +37,7 @@ const Design = () => {
           </TabsContent>
 
           <TabsContent value="3d">
-            <Card>
-              <CardContent className="pt-6 space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  3D room and floorplan‑to‑3D features will appear here. For now, this is just a placeholder scene.
-                </p>
-                <BasicRoomViewer />
-              </CardContent>
-            </Card>
+            <Studio3DEditor />
           </TabsContent>
         </Tabs>
       </div>
