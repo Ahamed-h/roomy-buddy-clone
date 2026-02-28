@@ -238,20 +238,6 @@ const Index = () => {
                 </Link>
               </Button>
             </motion.div>
-            <motion.div
-              className="overflow-hidden rounded-xl border border-primary/20 shadow-xl orange-glow"
-              initial={{ opacity: 0, x: 30 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6 }}
-            >
-              <img
-                src="/images/design-studio-features.png"
-                alt="Design Studio features showing photorealistic rendering and furniture marketplace"
-                className="w-full"
-                loading="lazy"
-              />
-            </motion.div>
           </div>
         </div>
       </section>
