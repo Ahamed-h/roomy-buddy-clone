@@ -1,20 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Sparkles, Send, Loader2, ImageIcon, ThumbsUp, ThumbsDown, Bot, User, TrendingUp } from "lucide-react";
 import { getHfSpacesUrl } from "@/services/api";
 
-const STYLES = [
-  { value: "modern", label: "Modern" },
-  { value: "scandinavian", label: "Scandinavian" },
-  { value: "industrial", label: "Industrial" },
-  { value: "minimalist", label: "Minimalist" },
-  { value: "boho", label: "Boho" },
-];
 
 interface ChatMessage {
   role: "user" | "ai";
@@ -33,7 +27,7 @@ const Design2DTab = () => {
   const [inputMessage, setInputMessage] = useState("");
   const [currentImage, setCurrentImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [selectedStyle, setSelectedStyle] = useState("modern");
+  const [includeEvaluation, setIncludeEvaluation] = useState(true);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [evaluationResult, setEvaluationResult] = useState<any>(null);
   const [aestheticHistory, setAestheticHistory] = useState<number[]>([]);
@@ -107,13 +101,13 @@ const Design2DTab = () => {
       addMessage("ai", "Please upload a room photo first!");
       return;
     }
-    const style = styleOverride || selectedStyle;
+    const style = styleOverride || "modern";
     setIsGenerating(true);
     setAwaitingFeedback(false);
-    addMessage("ai", `🎨 Generating a **${style}** redesign... Please wait.`);
+    addMessage("ai", `🎨 Generating a redesign... Please wait.${includeEvaluation && evaluationResult ? " (Including evaluation data)" : ""}`);
     try {
       let enhancedPrompt = style;
-      if (evaluationResult) {
+      if (includeEvaluation && evaluationResult) {
         try {
           const promptResp = await fetch(`${API}/design/enhance_prompt`, {
             method: "POST",
@@ -163,10 +157,10 @@ const Design2DTab = () => {
       await runAnalysis();
       return;
     }
-    const matchedStyle = STYLES.find((s) => lower.includes(s.value));
+    const styleKeywords = ["modern", "scandinavian", "industrial", "minimalist", "boho"];
+    const matchedStyle = styleKeywords.find((s) => lower.includes(s));
     if (matchedStyle && (lower.includes("redesign") || lower.includes("transform") || lower.includes("change") || lower.includes("make it") || lower.includes("convert"))) {
-      setSelectedStyle(matchedStyle.value);
-      await runRedesign(matchedStyle.value);
+      await runRedesign(matchedStyle);
       return;
     }
     if (lower.includes("redesign") || lower.includes("generate") || lower.includes("create")) {
@@ -184,7 +178,7 @@ const Design2DTab = () => {
       const data = await resp.json();
       addMessage("ai", data.response || "I'm not sure how to help with that. Try asking about room design!");
       if (data.action === "generate") {
-        await runRedesign(data.params?.style || selectedStyle);
+        await runRedesign(data.params?.style || "modern");
       } else if (data.action === "analyze") {
         await runAnalysis();
       }
@@ -266,18 +260,18 @@ const Design2DTab = () => {
 
         <Card className="glass-card-static">
           <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex-1">
-              <p className="mb-1.5 text-xs font-medium text-muted-foreground">Target Style</p>
-              <Select value={selectedStyle} onValueChange={setSelectedStyle}>
-                <SelectTrigger className="bg-muted/50 border-border/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="glass-card-static">
-                  {STYLES.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex items-center gap-3 flex-1">
+              <Switch
+                id="include-eval"
+                checked={includeEvaluation}
+                onCheckedChange={setIncludeEvaluation}
+              />
+              <Label htmlFor="include-eval" className="text-sm font-medium text-foreground cursor-pointer">
+                Add evaluation result?
+              </Label>
+              {!evaluationResult && includeEvaluation && (
+                <span className="text-xs text-muted-foreground">(Run analysis first)</span>
+              )}
             </div>
             {renderSparkline()}
           </CardContent>
