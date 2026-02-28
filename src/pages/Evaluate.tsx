@@ -10,11 +10,14 @@ import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
 import {
   Upload, Settings, BarChart3, Eye, Sparkles, ArrowRight,
-  Download, Info, Loader2, ImageIcon, Layers
+  Download, Info, Loader2, ImageIcon, Layers, Save
 } from "lucide-react";
 import { analyzeRoom, getMockResult, getHfSpacesUrl, setHfSpacesUrl, type AnalysisResult } from "@/services/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { saveDesign } from "@/lib/designs";
 
 const Evaluate = () => {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -158,6 +161,21 @@ const Evaluate = () => {
                 ← New Analysis
               </Button>
               <div className="flex gap-2">
+                {user && (
+                  <Button variant="outline" size="sm" onClick={async () => {
+                    try {
+                      await saveDesign({
+                        type: "evaluate",
+                        name: `Evaluation – ${new Date().toLocaleDateString()}`,
+                        thumbnail_url: imagePreview || null,
+                        data: result as unknown as Record<string, unknown>,
+                      });
+                      toast({ title: "Evaluation saved!", description: "View it in your dashboard." });
+                    } catch { toast({ title: "Save failed", variant: "destructive" }); }
+                  }}>
+                    <Save className="mr-2 h-4 w-4" /> Save to Profile
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" onClick={() => {
                   const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
                   const url = URL.createObjectURL(blob);

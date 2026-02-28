@@ -2,23 +2,53 @@ import { useState } from "react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Paintbrush, Box } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Paintbrush, Box, Save } from "lucide-react";
 import Design2DTab from "@/components/design/Design2DTab";
 import Studio3DEditor from "@/components/design/studio3d/Studio3DEditor";
+import { useAuth } from "@/contexts/AuthContext";
+import { saveDesign } from "@/lib/designs";
+import { useToast } from "@/hooks/use-toast";
 
 const Design = () => {
   const [activeTab, setActiveTab] = useState("2d");
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  const handleSaveDesign = async () => {
+    if (!user) {
+      toast({ title: "Sign in to save designs", description: "Use Google Sign In to save your work." });
+      return;
+    }
+    try {
+      await saveDesign({
+        type: activeTab === "2d" ? "2d" : "3d",
+        name: `${activeTab === "2d" ? "2D" : "3D"} Design – ${new Date().toLocaleDateString()}`,
+        data: { tab: activeTab },
+      });
+      toast({ title: "Design saved!", description: "View it in your dashboard." });
+    } catch {
+      toast({ title: "Save failed", variant: "destructive" });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
 
       <div className="container py-12">
-        <div className="mb-8">
-          <h1 className="font-display text-3xl font-bold">Design Studio</h1>
-          <p className="mt-1 text-muted-foreground">
-            Transform your room with AI‑powered design tools.
-          </p>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="font-display text-3xl font-bold">Design Studio</h1>
+            <p className="mt-1 text-muted-foreground">
+              Transform your room with AI‑powered design tools.
+            </p>
+          </div>
+          {user && (
+            <Button variant="outline" onClick={handleSaveDesign}>
+              <Save className="mr-2 h-4 w-4" /> Save Design
+            </Button>
+          )}
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
