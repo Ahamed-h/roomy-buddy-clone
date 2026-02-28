@@ -64,51 +64,52 @@ const Dashboard = () => {
   const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Designer";
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <Navbar />
       <div className="container py-12">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="font-display text-3xl font-bold">Welcome, {displayName}</h1>
+            <h1 className="font-display text-3xl font-bold text-foreground">Welcome, <span className="gradient-text">{displayName}</span></h1>
             <p className="mt-1 text-muted-foreground">Manage your saved designs and start new projects.</p>
           </div>
         </div>
 
         {/* Quick Actions */}
         <div className="mb-8 grid gap-4 sm:grid-cols-3">
-          <Button variant="outline" className="h-auto flex-col gap-2 py-6" onClick={() => navigate("/evaluate")}>
-            <Sparkles className="h-6 w-6 text-primary" />
-            <span className="font-display font-semibold">Quick Evaluate</span>
-            <span className="text-xs text-muted-foreground">Analyze a room photo</span>
-          </Button>
-          <Button variant="outline" className="h-auto flex-col gap-2 py-6" onClick={() => navigate("/design")}>
-            <Paintbrush className="h-6 w-6 text-primary" />
-            <span className="font-display font-semibold">New 2D Design</span>
-            <span className="text-xs text-muted-foreground">AI-powered redesign</span>
-          </Button>
-          <Button variant="outline" className="h-auto flex-col gap-2 py-6" onClick={() => navigate("/design")}>
-            <Box className="h-6 w-6 text-primary" />
-            <span className="font-display font-semibold">New 3D Design</span>
-            <span className="text-xs text-muted-foreground">3D room editor</span>
-          </Button>
+          {[
+            { icon: Sparkles, label: "Quick Evaluate", sub: "Analyze a room photo", to: "/evaluate" },
+            { icon: Paintbrush, label: "New 2D Design", sub: "AI-powered redesign", to: "/design" },
+            { icon: Box, label: "New 3D Design", sub: "3D room editor", to: "/design" },
+          ].map((a) => (
+            <Button
+              key={a.label}
+              variant="outline"
+              className="h-auto flex-col gap-2 py-6 glass-card border-border/40 hover:border-primary/40"
+              onClick={() => navigate(a.to)}
+            >
+              <a.icon className="h-6 w-6 text-primary" />
+              <span className="font-display font-semibold text-foreground">{a.label}</span>
+              <span className="text-xs text-muted-foreground">{a.sub}</span>
+            </Button>
+          ))}
         </div>
 
         {/* Designs Grid */}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-xl font-semibold">My Designs ({designs.length})</h2>
+          <h2 className="font-display text-xl font-semibold text-foreground">My Designs ({designs.length})</h2>
         </div>
 
         {loading ? (
           <div className="flex justify-center py-20">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <div className="orange-spinner h-8 w-8" />
           </div>
         ) : designs.length === 0 ? (
-          <Card>
+          <Card className="glass-card-static">
             <CardContent className="flex flex-col items-center justify-center py-20 text-center">
               <ImageIcon className="mb-4 h-12 w-12 text-muted-foreground" />
-              <h3 className="font-display text-lg font-semibold">No designs yet</h3>
+              <h3 className="font-display text-lg font-semibold text-foreground">No designs yet</h3>
               <p className="mt-1 text-sm text-muted-foreground">Get started by evaluating a room or creating a new design.</p>
-              <Button className="mt-4" onClick={() => navigate("/evaluate")}>
+              <Button className="mt-4 btn-premium" onClick={() => navigate("/evaluate")}>
                 <Plus className="mr-2 h-4 w-4" /> Create Your First Design
               </Button>
             </CardContent>
@@ -124,9 +125,9 @@ const Dashboard = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
                 >
-                  <Card className="group overflow-hidden transition-shadow hover:shadow-lg">
+                  <Card className="group glass-card overflow-hidden">
                     {/* Thumbnail */}
-                    <div className="relative aspect-video bg-muted">
+                    <div className="relative aspect-video bg-muted/30">
                       {design.thumbnail_url ? (
                         <img src={design.thumbnail_url} alt={design.name} className="h-full w-full object-cover" />
                       ) : (
@@ -135,21 +136,21 @@ const Dashboard = () => {
                         </div>
                       )}
                       <div className="absolute left-2 top-2">
-                        <span className="rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium backdrop-blur-sm">
+                        <span className="rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium text-foreground backdrop-blur-sm">
                           {typeLabels[design.type]}
                         </span>
                       </div>
                     </div>
                     <CardContent className="p-4">
-                      <h3 className="font-display font-semibold truncate">{design.name}</h3>
+                      <h3 className="font-display font-semibold truncate text-foreground">{design.name}</h3>
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         {new Date(design.created_at).toLocaleDateString()}
                       </p>
                       <div className="mt-3 flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => navigate(`/design?id=${design.id}`)}>
+                        <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-primary" onClick={() => navigate(`/design?id=${design.id}`)}>
                           <Pencil className="mr-1 h-3 w-3" /> Edit
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => handleDuplicate(design.id)}>
+                        <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-primary" onClick={() => handleDuplicate(design.id)}>
                           <Copy className="mr-1 h-3 w-3" /> Duplicate
                         </Button>
                         <AlertDialog>
@@ -158,14 +159,14 @@ const Dashboard = () => {
                               <Trash2 className="mr-1 h-3 w-3" /> Delete
                             </Button>
                           </AlertDialogTrigger>
-                          <AlertDialogContent>
+                          <AlertDialogContent className="glass-card-static">
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Delete design?</AlertDialogTitle>
+                              <AlertDialogTitle className="text-foreground">Delete design?</AlertDialogTitle>
                               <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                               <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(design.id)}>Delete</AlertDialogAction>
+                              <AlertDialogAction onClick={() => handleDelete(design.id)} className="btn-premium">Delete</AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>
                         </AlertDialog>

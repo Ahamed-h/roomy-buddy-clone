@@ -33,32 +33,32 @@ const Design = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <Navbar />
 
       <div className="container py-12">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="font-display text-3xl font-bold">Design Studio</h1>
+            <h1 className="font-display text-3xl font-bold text-foreground">Design Studio</h1>
             <p className="mt-1 text-muted-foreground">
               Transform your room with AI‑powered design tools.
             </p>
           </div>
           {user && (
-            <Button variant="outline" onClick={handleSaveDesign}>
+            <Button variant="outline" onClick={handleSaveDesign} className="border-border/50 hover:border-primary/30">
               <Save className="mr-2 h-4 w-4" /> Save Design
             </Button>
           )}
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-6 grid w-full max-w-md grid-cols-2">
-            <TabsTrigger value="2d" className="gap-2">
+          <TabsList className="mb-6 grid w-full max-w-md grid-cols-2 bg-muted/50 backdrop-blur-sm">
+            <TabsTrigger value="2d" className="gap-2 data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
               <Paintbrush className="h-4 w-4" /> 2D Design Generation
             </TabsTrigger>
-            <TabsTrigger value="3d" className="gap-2">
+            <TabsTrigger value="3d" className="gap-2 data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
               <Box className="h-4 w-4" /> 3D Design
-              <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Soon</span>
+              <span className="ml-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">Soon</span>
             </TabsTrigger>
           </TabsList>
 

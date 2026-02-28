@@ -59,18 +59,18 @@ const localSteps = [
 
 const About = () => {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <Navbar />
 
       {/* Header */}
-      <section className="border-b border-border py-20">
+      <section className="border-b border-border/30 py-20">
         <div className="container text-center">
           <motion.h1
-            className="font-display text-4xl font-bold md:text-5xl"
+            className="font-display text-4xl font-extrabold md:text-5xl"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            About aivo<span className="text-primary">.ai</span>
+            About <span className="gradient-text">aivo.ai</span>
           </motion.h1>
           <motion.p
             className="mx-auto mt-4 max-w-2xl text-lg text-muted-foreground"
@@ -86,12 +86,12 @@ const About = () => {
       {/* How It Works */}
       <section className="py-20">
         <div className="container">
-          <h2 className="mb-12 text-center font-display text-3xl font-bold">How It Works</h2>
+          <h2 className="mb-12 text-center font-display text-3xl font-bold text-foreground">How It Works</h2>
           <div className="grid gap-8 md:grid-cols-2">
             {steps.map((s, i) => (
               <motion.div
                 key={s.num}
-                className="rounded-xl border border-border bg-card p-8"
+                className="glass-card rounded-xl p-8"
                 initial="hidden"
                 whileInView="visible"
                 viewport={{ once: true }}
@@ -99,7 +99,7 @@ const About = () => {
                 custom={i}
               >
                 <span className="font-display text-5xl font-bold text-primary/15">{s.num}</span>
-                <h3 className="mt-2 font-display text-xl font-semibold">{s.title}</h3>
+                <h3 className="mt-2 font-display text-xl font-semibold text-foreground">{s.title}</h3>
                 <p className="mt-3 text-muted-foreground">{s.desc}</p>
               </motion.div>
             ))}
@@ -108,9 +108,9 @@ const About = () => {
       </section>
 
       {/* AI Models */}
-      <section className="border-t border-border bg-muted/30 py-20">
+      <section className="border-t border-border/30 py-20">
         <div className="container">
-          <h2 className="mb-4 text-center font-display text-3xl font-bold">AI Models & Algorithms</h2>
+          <h2 className="mb-4 text-center font-display text-3xl font-bold text-foreground">AI Models & Algorithms</h2>
           <p className="mx-auto mb-12 max-w-2xl text-center text-muted-foreground">
             These are the actual models running on your local server — optimized for CPU inference.
           </p>
@@ -118,7 +118,7 @@ const About = () => {
             {models.map((m, i) => (
               <motion.div
                 key={m.name}
-                className="flex gap-4 rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary/30"
+                className="glass-card flex gap-4 rounded-xl p-5"
                 initial="hidden"
                 whileInView="visible"
                 viewport={{ once: true }}
@@ -129,7 +129,7 @@ const About = () => {
                   <m.icon className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="font-display font-semibold">{m.name}</h3>
+                  <h3 className="font-display font-semibold text-foreground">{m.name}</h3>
                   <p className="mt-1 text-sm text-muted-foreground">{m.desc}</p>
                 </div>
               </motion.div>
@@ -138,12 +138,12 @@ const About = () => {
         </div>
       </section>
 
-      {/* HF Spaces Guide */}
+      {/* Local Server Guide */}
       <section className="py-20">
         <div className="container max-w-3xl">
           <div className="flex items-center gap-3 mb-8">
             <Server className="h-6 w-6 text-primary" />
-            <h2 className="font-display text-3xl font-bold">Local Server Setup</h2>
+            <h2 className="font-display text-3xl font-bold text-foreground">Local Server Setup</h2>
           </div>
           <p className="mb-8 text-muted-foreground">
             Your ML models run locally on your machine — no GPU required. Follow these steps:
@@ -152,7 +152,7 @@ const About = () => {
             {localSteps.map((step, i) => (
               <motion.li
                 key={i}
-                className="flex gap-4 rounded-lg border border-border bg-card p-4"
+                className="flex gap-4 glass-card-static rounded-lg p-4"
                 initial="hidden"
                 whileInView="visible"
                 viewport={{ once: true }}
@@ -162,7 +162,7 @@ const About = () => {
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
                   {i + 1}
                 </span>
-                <span className="text-sm">{step}</span>
+                <span className="text-sm text-foreground">{step}</span>
               </motion.li>
             ))}
           </ol>
@@ -170,17 +170,17 @@ const About = () => {
       </section>
 
       {/* Created By */}
-      <section className="border-t border-border bg-muted/30 py-20">
+      <section className="border-t border-border/30 py-20">
         <div className="container text-center">
           <Users className="mx-auto mb-4 h-8 w-8 text-primary" />
-          <h2 className="font-display text-3xl font-bold">Created By</h2>
+          <h2 className="font-display text-3xl font-bold text-foreground">Created By</h2>
           <div className="mx-auto mt-8 grid max-w-md gap-6 md:grid-cols-2">
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="font-display text-lg font-semibold">Ahamed H</h3>
+            <div className="glass-card rounded-xl p-6">
+              <h3 className="font-display text-lg font-semibold text-foreground">Ahamed H</h3>
               <p className="mt-1 text-sm text-muted-foreground">Roll No: 220071601018</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="font-display text-lg font-semibold">Aashif M</h3>
+            <div className="glass-card rounded-xl p-6">
+              <h3 className="font-display text-lg font-semibold text-foreground">Aashif M</h3>
               <p className="mt-1 text-sm text-muted-foreground">Roll No: 220071601003</p>
             </div>
           </div>

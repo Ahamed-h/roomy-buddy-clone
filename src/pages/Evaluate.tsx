@@ -66,10 +66,8 @@ const Evaluate = () => {
     }
   };
 
-  // Helper to get brightness from either new or legacy format
   const getBrightness = (r: AnalysisResult) => r.lighting?.brightness ?? r.brightness ?? 0;
 
-  // Style scores: prefer new format, fall back to legacy
   const getStyleScores = (r: AnalysisResult): Array<{ style: string; score: number }> => {
     if (r.style_match_scores && Object.keys(r.style_match_scores).length > 0) {
       return Object.entries(r.style_match_scores)
@@ -80,32 +78,33 @@ const Evaluate = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <Navbar />
 
       <div className="container py-12">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="font-display text-3xl font-bold">AI Room Evaluation</h1>
+            <h1 className="font-display text-3xl font-bold text-foreground">AI Room Evaluation</h1>
             <p className="mt-1 text-muted-foreground">Upload a room photo to analyze with real ML models.</p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setShowSettings(!showSettings)}>
+          <Button variant="outline" size="sm" onClick={() => setShowSettings(!showSettings)} className="border-border/50 hover:border-primary/30">
             <Settings className="mr-2 h-4 w-4" /> Settings
           </Button>
         </div>
 
         {/* Settings */}
         {showSettings && (
-          <Card className="mb-6">
+          <Card className="mb-6 glass-card-static">
             <CardContent className="pt-6">
-              <label className="text-sm font-medium">Local ML Server URL</label>
+              <label className="text-sm font-medium text-foreground">Local ML Server URL</label>
               <div className="mt-2 flex gap-2">
                 <Input
                   value={hfUrl}
                   onChange={(e) => setHfUrl(e.target.value)}
                   placeholder="http://localhost:8000"
+                  className="bg-muted/50 border-border/50 focus:border-primary/50"
                 />
-                <Button onClick={() => { setHfSpacesUrl(hfUrl); toast({ title: "Saved!" }); }}>
+                <Button onClick={() => { setHfSpacesUrl(hfUrl); toast({ title: "Saved!" }); }} className="btn-premium">
                   Save
                 </Button>
               </div>
@@ -122,17 +121,17 @@ const Evaluate = () => {
             <div
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
-              className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-card p-16 transition-colors hover:border-primary/40"
+              className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border/50 glass-card-static p-16 transition-all hover:border-primary/40"
             >
               {imagePreview ? (
                 <div className="w-full max-w-2xl space-y-4">
                   <img src={imagePreview} alt="Room preview" className="w-full rounded-lg" />
                   <div className="flex justify-center gap-3">
-                    <Button variant="outline" onClick={() => { setImage(null); setImagePreview(null); }}>
+                    <Button variant="outline" className="border-border/50 hover:border-primary/30" onClick={() => { setImage(null); setImagePreview(null); }}>
                       Change Photo
                     </Button>
-                    <Button onClick={runAnalysis} disabled={loading}>
-                      {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                    <Button onClick={runAnalysis} disabled={loading} className="btn-premium">
+                      {loading ? <div className="orange-spinner mr-2 h-4 w-4" /> : <Sparkles className="mr-2 h-4 w-4" />}
                       {loading ? "Analyzing..." : "Run AI Evaluation"}
                     </Button>
                   </div>
@@ -140,10 +139,10 @@ const Evaluate = () => {
               ) : (
                 <>
                   <Upload className="mb-4 h-12 w-12 text-muted-foreground" />
-                  <h2 className="font-display text-xl font-semibold">Upload your room photo</h2>
+                  <h2 className="font-display text-xl font-semibold text-foreground">Upload your room photo</h2>
                   <p className="mt-2 text-sm text-muted-foreground">Drag & drop or click to browse. JPG/PNG, up to 10MB.</p>
                   <label className="mt-4 cursor-pointer">
-                    <Button asChild><span>Choose File</span></Button>
+                    <Button className="btn-premium" asChild><span>Choose File</span></Button>
                     <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
                   </label>
                 </>
@@ -157,12 +156,12 @@ const Evaluate = () => {
           <motion.div className="space-y-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             {/* Back + actions */}
             <div className="flex items-center justify-between">
-              <Button variant="ghost" onClick={() => { setResult(null); setImage(null); setImagePreview(null); }}>
+              <Button variant="ghost" className="text-muted-foreground hover:text-foreground" onClick={() => { setResult(null); setImage(null); setImagePreview(null); }}>
                 ← New Analysis
               </Button>
               <div className="flex gap-2">
                 {user && (
-                  <Button variant="outline" size="sm" onClick={async () => {
+                  <Button variant="outline" size="sm" className="border-border/50 hover:border-primary/30" onClick={async () => {
                     try {
                       await saveDesign({
                         type: "evaluate",
@@ -176,7 +175,7 @@ const Evaluate = () => {
                     <Save className="mr-2 h-4 w-4" /> Save to Profile
                   </Button>
                 )}
-                <Button variant="outline" size="sm" onClick={() => {
+                <Button variant="outline" size="sm" className="border-border/50 hover:border-primary/30" onClick={() => {
                   const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
@@ -184,7 +183,7 @@ const Evaluate = () => {
                 }}>
                   <Download className="mr-2 h-4 w-4" /> Download JSON
                 </Button>
-                <Button size="sm" asChild>
+                <Button size="sm" className="btn-premium" asChild>
                   <a href="/design"><ArrowRight className="mr-2 h-4 w-4" /> Open in Design Studio</a>
                 </Button>
               </div>
@@ -192,35 +191,35 @@ const Evaluate = () => {
 
             {/* Metric Cards */}
             <div className="grid gap-4 md:grid-cols-3">
-              <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+              <Card className="glass-card border-primary/20 orange-glow">
                 <CardContent className="pt-6">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Sparkles className="h-4 w-4 text-primary" /> Aesthetic Score
                   </div>
-                  <p className="mt-2 font-display text-4xl font-bold">{result.aesthetic_score.toFixed(1)}<span className="text-lg text-muted-foreground">/10</span></p>
+                  <p className="mt-2 font-display text-4xl font-bold text-foreground">{result.aesthetic_score.toFixed(1)}<span className="text-lg text-muted-foreground">/10</span></p>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="glass-card-static">
                 <CardContent className="pt-6">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Eye className="h-4 w-4" /> Brightness
                   </div>
-                  <p className="mt-2 font-display text-4xl font-bold">{getBrightness(result)}<span className="text-lg text-muted-foreground">%</span></p>
+                  <p className="mt-2 font-display text-4xl font-bold text-foreground">{getBrightness(result)}<span className="text-lg text-muted-foreground">%</span></p>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="glass-card-static">
                 <CardContent className="pt-6">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <BarChart3 className="h-4 w-4" /> Objects Detected
                   </div>
-                  <p className="mt-2 font-display text-4xl font-bold">{result.objects.length}</p>
+                  <p className="mt-2 font-display text-4xl font-bold text-foreground">{result.objects.length}</p>
                 </CardContent>
               </Card>
             </div>
 
             {/* Room photo */}
             {imagePreview && (
-              <Card>
+              <Card className="glass-card-static overflow-hidden">
                 <CardContent className="pt-6">
                   <img src={imagePreview} alt="Analyzed room" className="w-full rounded-lg" />
                 </CardContent>
@@ -228,15 +227,15 @@ const Evaluate = () => {
             )}
 
             {/* Style Matches */}
-            <Card>
+            <Card className="glass-card-static">
               <CardHeader>
-                <CardTitle className="font-display text-lg">Style Match Scores</CardTitle>
+                <CardTitle className="font-display text-lg text-foreground">Style Match Scores</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {getStyleScores(result).map((s) => (
                   <div key={s.style}>
                     <div className="flex justify-between text-sm">
-                      <span>{s.style}</span>
+                      <span className="text-foreground">{s.style}</span>
                       <span className="text-muted-foreground">{Math.round(s.score * 100)}%</span>
                     </div>
                     <Progress value={s.score * 100} className="mt-1 h-2" />
@@ -246,29 +245,29 @@ const Evaluate = () => {
             </Card>
 
             {/* Objects Table */}
-            <Card>
+            <Card className="glass-card-static">
               <CardHeader>
-                <CardTitle className="font-display text-lg">Detected Objects</CardTitle>
+                <CardTitle className="font-display text-lg text-foreground">Detected Objects</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border">
-                        <th className="p-2 text-left font-medium">Object</th>
-                        <th className="p-2 text-left font-medium">Confidence</th>
-                        <th className="p-2 text-left font-medium">Material</th>
-                        <th className="p-2 text-left font-medium">Distance</th>
-                        <th className="p-2 text-left font-medium">Source</th>
+                      <tr className="border-b border-border/50">
+                        <th className="p-2 text-left font-medium text-muted-foreground">Object</th>
+                        <th className="p-2 text-left font-medium text-muted-foreground">Confidence</th>
+                        <th className="p-2 text-left font-medium text-muted-foreground">Material</th>
+                        <th className="p-2 text-left font-medium text-muted-foreground">Distance</th>
+                        <th className="p-2 text-left font-medium text-muted-foreground">Source</th>
                       </tr>
                     </thead>
                     <tbody>
                       {result.objects.map((obj, i) => (
-                        <tr key={i} className="border-b border-border/50">
-                          <td className="p-2 capitalize font-medium">{obj.name || (obj as any).label}</td>
-                          <td className="p-2">{(obj.confidence * 100).toFixed(0)}%</td>
+                        <tr key={i} className="border-b border-border/30">
+                          <td className="p-2 capitalize font-medium text-foreground">{obj.name || (obj as any).label}</td>
+                          <td className="p-2 text-foreground">{(obj.confidence * 100).toFixed(0)}%</td>
                           <td className="p-2"><Badge variant="secondary" className="capitalize">{obj.material}</Badge></td>
-                          <td className="p-2">{(obj.distance_m ?? (obj as any).distance ?? 0).toFixed(1)}m</td>
+                          <td className="p-2 text-foreground">{(obj.distance_m ?? (obj as any).distance ?? 0).toFixed(1)}m</td>
                           <td className="p-2"><Badge variant="outline">{obj.source}</Badge></td>
                         </tr>
                       ))}
@@ -280,24 +279,24 @@ const Evaluate = () => {
 
             {/* Depth Map indicator */}
             {result.depth_map && result.depth_map.length > 0 && (
-              <Card>
+              <Card className="glass-card-static">
                 <CardContent className="flex items-center gap-3 pt-6">
                   <Layers className="h-5 w-5 text-primary" />
-                  <p className="text-sm font-medium">Depth map available ({result.depth_map.length}×{result.depth_map[0]?.length || 0} pixels)</p>
+                  <p className="text-sm font-medium text-foreground">Depth map available ({result.depth_map.length}×{result.depth_map[0]?.length || 0} pixels)</p>
                 </CardContent>
               </Card>
             )}
 
             {/* Recommendations */}
-            <Card>
+            <Card className="glass-card-static">
               <CardHeader>
-                <CardTitle className="font-display text-lg">AI Recommendations</CardTitle>
+                <CardTitle className="font-display text-lg text-foreground">AI Recommendations</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {result.recommendations.map((tip, i) => (
-                  <div key={i} className="flex gap-3 rounded-lg border border-border bg-muted/30 p-4">
+                  <div key={i} className="flex gap-3 rounded-lg border border-border/30 bg-muted/30 p-4 backdrop-blur-sm">
                     <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                    <p className="text-sm">{tip}</p>
+                    <p className="text-sm text-foreground">{tip}</p>
                   </div>
                 ))}
               </CardContent>

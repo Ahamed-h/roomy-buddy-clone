@@ -88,12 +88,12 @@ const faqs = [
 
 const Index = () => {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <Navbar />
 
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,hsl(152_60%_42%/0.08),transparent_70%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,107,53,0.08),transparent_70%)]" />
         <div className="container relative py-24 md:py-32">
           <motion.div
             className="mx-auto max-w-3xl text-center"
@@ -102,25 +102,25 @@ const Index = () => {
             variants={fadeUp}
             custom={0}
           >
-            <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-xs font-medium text-primary">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-xs font-medium text-primary backdrop-blur-sm">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
               AI-Powered Design Studio
             </span>
-            <h1 className="mt-4 font-display text-5xl font-bold leading-tight tracking-tight md:text-7xl">
-              3D design
+            <h1 className="mt-4 font-display text-5xl font-extrabold leading-tight tracking-tight md:text-7xl">
+              <span className="gradient-text">3D design</span>
               <br />
-              <span className="text-primary">&amp; shopping.</span>
+              <span className="text-foreground">&amp; shopping.</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-lg text-muted-foreground">
               Evaluate your room with real ML models. Get AI redesigns. Shop real furniture from any store — zero markup. All in one studio.
             </p>
             <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-              <Button size="lg" asChild>
+              <Button size="lg" className="btn-premium px-8 py-6 text-base" asChild>
                 <Link to="/evaluate">
                   Evaluate your room <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-              <Button size="lg" variant="outline" asChild>
+              <Button size="lg" variant="outline" className="border-border/50 bg-muted/30 backdrop-blur-sm hover:bg-muted/50 hover:border-primary/30 transition-all" asChild>
                 <Link to="/design">Open Design Studio</Link>
               </Button>
             </div>
@@ -128,7 +128,7 @@ const Index = () => {
 
           {/* Preview image */}
           <motion.div
-            className="mx-auto mt-16 max-w-5xl overflow-hidden rounded-xl border border-border shadow-2xl"
+            className="mx-auto mt-16 max-w-5xl overflow-hidden rounded-xl border border-primary/20 shadow-2xl orange-glow"
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.7 }}
@@ -144,7 +144,7 @@ const Index = () => {
       </section>
 
       {/* How It Works */}
-      <section className="border-t border-border bg-muted/30 py-24">
+      <section className="border-t border-border/30 py-24">
         <div className="container">
           <motion.div
             className="mb-16 text-center"
@@ -154,14 +154,14 @@ const Index = () => {
             variants={fadeUp}
             custom={0}
           >
-            <h2 className="font-display text-3xl font-bold md:text-4xl">How It Works</h2>
+            <h2 className="font-display text-3xl font-bold md:text-4xl text-foreground">How It Works</h2>
             <p className="mt-3 text-muted-foreground">Four steps to your perfect room.</p>
           </motion.div>
           <div className="grid gap-8 md:grid-cols-4">
             {steps.map((step, i) => (
               <motion.div
                 key={step.num}
-                className="relative rounded-xl border border-border bg-card p-6"
+                className="relative glass-card rounded-xl p-6"
                 initial="hidden"
                 whileInView="visible"
                 viewport={{ once: true }}
@@ -169,7 +169,7 @@ const Index = () => {
                 custom={i}
               >
                 <span className="font-display text-4xl font-bold text-primary/20">{step.num}</span>
-                <h3 className="mt-2 font-display text-lg font-semibold">{step.title}</h3>
+                <h3 className="mt-2 font-display text-lg font-semibold text-foreground">{step.title}</h3>
                 <p className="mt-2 text-sm text-muted-foreground">{step.desc}</p>
               </motion.div>
             ))}
@@ -188,14 +188,14 @@ const Index = () => {
             variants={fadeUp}
             custom={0}
           >
-            <h2 className="font-display text-3xl font-bold md:text-4xl">Everything you need</h2>
+            <h2 className="font-display text-3xl font-bold md:text-4xl text-foreground">Everything you need</h2>
             <p className="mt-3 text-muted-foreground">Real AI. Real furniture. Real results.</p>
           </motion.div>
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {features.map((f, i) => (
               <motion.div
                 key={f.title}
-                className="group rounded-xl border border-border bg-card p-6 transition-all hover:border-primary/30 hover:shadow-lg"
+                className="group glass-card rounded-xl p-6"
                 initial="hidden"
                 whileInView="visible"
                 viewport={{ once: true }}
@@ -205,7 +205,7 @@ const Index = () => {
                 <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
                   <f.icon className="h-5 w-5" />
                 </div>
-                <h3 className="font-display text-lg font-semibold">{f.title}</h3>
+                <h3 className="font-display text-lg font-semibold text-foreground">{f.title}</h3>
                 <p className="mt-2 text-sm text-muted-foreground">{f.desc}</p>
               </motion.div>
             ))}
@@ -213,8 +213,8 @@ const Index = () => {
         </div>
       </section>
 
-      {/* Feature highlights from uploaded images */}
-      <section className="border-t border-border bg-muted/30 py-24">
+      {/* Feature highlights */}
+      <section className="border-t border-border/30 py-24">
         <div className="container">
           <div className="grid items-center gap-12 lg:grid-cols-2">
             <motion.div
@@ -224,7 +224,7 @@ const Index = () => {
               variants={fadeUp}
               custom={0}
             >
-              <h2 className="font-display text-3xl font-bold md:text-4xl">
+              <h2 className="font-display text-3xl font-bold md:text-4xl text-foreground">
                 Photorealistic before you purchase
               </h2>
               <p className="mt-4 text-muted-foreground">
@@ -234,26 +234,26 @@ const Index = () => {
                 <div className="flex gap-3">
                   <Camera className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                   <div>
-                    <h4 className="font-display font-semibold">Every store, zero markup</h4>
+                    <h4 className="font-display font-semibold text-foreground">Every store, zero markup</h4>
                     <p className="text-sm text-muted-foreground">Browse furniture from any retailer on the web. Buy direct at their listed price.</p>
                   </div>
                 </div>
                 <div className="flex gap-3">
                   <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                   <div>
-                    <h4 className="font-display font-semibold">AI that designs with you</h4>
+                    <h4 className="font-display font-semibold text-foreground">AI that designs with you</h4>
                     <p className="text-sm text-muted-foreground">Tell RoomBot what you want. It sees your space like a professional and gives you layouts, advice, and pieces that work.</p>
                   </div>
                 </div>
               </div>
-              <Button className="mt-8" asChild>
+              <Button className="mt-8 btn-premium" asChild>
                 <Link to="/design">
                   Try Design Studio <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
             </motion.div>
             <motion.div
-              className="overflow-hidden rounded-xl border border-border shadow-xl"
+              className="overflow-hidden rounded-xl border border-primary/20 shadow-xl orange-glow"
               initial={{ opacity: 0, x: 30 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
@@ -281,12 +281,12 @@ const Index = () => {
             variants={fadeUp}
             custom={0}
           >
-            <h2 className="font-display text-3xl font-bold">Frequently Asked Questions</h2>
+            <h2 className="font-display text-3xl font-bold text-foreground">Frequently Asked Questions</h2>
           </motion.div>
           <Accordion type="single" collapsible className="w-full">
             {faqs.map((faq, i) => (
-              <AccordionItem key={i} value={`faq-${i}`}>
-                <AccordionTrigger className="text-left font-display">{faq.q}</AccordionTrigger>
+              <AccordionItem key={i} value={`faq-${i}`} className="border-border/40">
+                <AccordionTrigger className="text-left font-display text-foreground hover:text-primary">{faq.q}</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground">{faq.a}</AccordionContent>
               </AccordionItem>
             ))}
@@ -295,17 +295,17 @@ const Index = () => {
       </section>
 
       {/* Final CTA */}
-      <section className="border-t border-border bg-muted/30 py-24">
+      <section className="border-t border-border/30 py-24">
         <div className="container text-center">
-          <h2 className="font-display text-3xl font-bold md:text-4xl">Ready to redesign your space?</h2>
+          <h2 className="font-display text-3xl font-bold md:text-4xl text-foreground">Ready to redesign your space?</h2>
           <p className="mx-auto mt-4 max-w-lg text-muted-foreground">
             Upload a photo, get AI analysis, browse real furniture, and see photorealistic renders — all free.
           </p>
           <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-            <Button size="lg" asChild>
+            <Button size="lg" className="btn-premium px-8" asChild>
               <Link to="/evaluate">Start Evaluating <ArrowRight className="ml-2 h-4 w-4" /></Link>
             </Button>
-            <Button size="lg" variant="outline" asChild>
+            <Button size="lg" variant="outline" className="border-border/50 bg-muted/30 backdrop-blur-sm hover:bg-muted/50" asChild>
               <Link to="/about">Learn More</Link>
             </Button>
           </div>

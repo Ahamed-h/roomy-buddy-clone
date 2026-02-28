@@ -28,7 +28,6 @@ const Design2DTab = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const API = getHfSpacesUrl();
 
-  // State
   const [sessionId] = useState(() => crypto.randomUUID());
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState("");
@@ -43,12 +42,10 @@ const Design2DTab = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [awaitingFeedback, setAwaitingFeedback] = useState(false);
 
-  // Auto-scroll chat
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [chatHistory, isTyping]);
 
-  // Initial greeting
   useEffect(() => {
     setChatHistory([
       {
@@ -74,8 +71,6 @@ const Design2DTab = () => {
     }
   };
 
-  // --- API calls ---
-
   const runAnalysis = async () => {
     if (!currentImage) return;
     setIsAnalyzing(true);
@@ -88,10 +83,8 @@ const Design2DTab = () => {
       const data = await resp.json();
       setEvaluationResult(data);
       setAestheticHistory((prev) => [...prev, data.aesthetic_score]);
-
       const topStyles = data.possible_styles?.slice(0, 3).join(", ") || "mixed";
       const recs = data.recommendations?.slice(0, 2).map((r: string) => `• ${r}`).join("\n") || "None";
-
       addMessage(
         "ai",
         `✅ **Analysis complete!**\n\n` +
@@ -118,9 +111,7 @@ const Design2DTab = () => {
     setIsGenerating(true);
     setAwaitingFeedback(false);
     addMessage("ai", `🎨 Generating a **${style}** redesign... Please wait.`);
-
     try {
-      // Try enhanced prompt first
       let enhancedPrompt = style;
       if (evaluationResult) {
         try {
@@ -133,11 +124,8 @@ const Design2DTab = () => {
             const promptData = await promptResp.json();
             enhancedPrompt = promptData.enhanced_prompt || style;
           }
-        } catch {
-          // Fall back to basic style
-        }
+        } catch {}
       }
-
       const fd = new FormData();
       fd.append("file", currentImage);
       fd.append("style_prompt", enhancedPrompt);
@@ -145,8 +133,6 @@ const Design2DTab = () => {
       if (!resp.ok) throw new Error(`Generation failed: ${resp.status}`);
       const data = await resp.json();
       setGeneratedImageUrl(data.image_url);
-
-      // Re-evaluate the generated image for aesthetic score tracking
       try {
         const evalFd = new FormData();
         const imgResp = await fetch(data.image_url);
@@ -157,10 +143,7 @@ const Design2DTab = () => {
           const evalData = await evalResp.json();
           setAestheticHistory((prev) => [...prev, evalData.aesthetic_score]);
         }
-      } catch {
-        // Score tracking is optional
-      }
-
+      } catch {}
       addMessage("ai", `Here's your **${style}** redesign! 👇\n\nIs this design good? Use the buttons below, or tell me what you'd like to change.`, data.image_url);
       setAwaitingFeedback(true);
     } catch (err: any) {
@@ -175,29 +158,21 @@ const Design2DTab = () => {
     if (!msg) return;
     setInputMessage("");
     addMessage("user", msg);
-
     const lower = msg.toLowerCase();
-
-    // Smart routing
     if (lower.includes("analyze") || lower.includes("evaluate") || lower === "yes") {
       await runAnalysis();
       return;
     }
-
-    // Style detection
     const matchedStyle = STYLES.find((s) => lower.includes(s.value));
     if (matchedStyle && (lower.includes("redesign") || lower.includes("transform") || lower.includes("change") || lower.includes("make it") || lower.includes("convert"))) {
       setSelectedStyle(matchedStyle.value);
       await runRedesign(matchedStyle.value);
       return;
     }
-
     if (lower.includes("redesign") || lower.includes("generate") || lower.includes("create")) {
       await runRedesign();
       return;
     }
-
-    // General chat via backend
     setIsTyping(true);
     try {
       const resp = await fetch(`${API}/design/chat`, {
@@ -207,17 +182,13 @@ const Design2DTab = () => {
       });
       if (!resp.ok) throw new Error(`Chat failed: ${resp.status}`);
       const data = await resp.json();
-
       addMessage("ai", data.response || "I'm not sure how to help with that. Try asking about room design!");
-
-      // Handle actions from backend
       if (data.action === "generate") {
         await runRedesign(data.params?.style || selectedStyle);
       } else if (data.action === "analyze") {
         await runAnalysis();
       }
     } catch {
-      // Fallback local response
       addMessage("ai", "I couldn't reach the chat server. You can still:\n• Type `analyze` to evaluate your photo\n• Type `redesign` to generate a new design\n• Pick a style from the dropdown and say `redesign`");
     } finally {
       setIsTyping(false);
@@ -239,7 +210,6 @@ const Design2DTab = () => {
     }
   };
 
-  // Sparkline renderer
   const renderSparkline = () => {
     if (aestheticHistory.length < 2) return null;
     const max = Math.max(...aestheticHistory, 10);
@@ -277,16 +247,16 @@ const Design2DTab = () => {
     <div className="flex flex-col gap-4">
       {/* Top: Upload + Style */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Card>
+        <Card className="glass-card-static">
           <CardContent className="p-4">
-            <label className="flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-border p-4 transition-colors hover:border-primary/40">
+            <label className="flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-border/50 p-4 transition-all hover:border-primary/40 hover:bg-muted/20">
               {imagePreview ? (
                 <img src={imagePreview} alt="Room" className="h-16 w-16 rounded-md object-cover" />
               ) : (
                 <Upload className="h-8 w-8 text-muted-foreground" />
               )}
               <div className="flex-1">
-                <p className="text-sm font-medium">{currentImage ? currentImage.name : "Upload room photo"}</p>
+                <p className="text-sm font-medium text-foreground">{currentImage ? currentImage.name : "Upload room photo"}</p>
                 <p className="text-xs text-muted-foreground">JPG / PNG, up to 10 MB</p>
               </div>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
@@ -294,15 +264,15 @@ const Design2DTab = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="glass-card-static">
           <CardContent className="flex items-center gap-3 p-4">
             <div className="flex-1">
               <p className="mb-1.5 text-xs font-medium text-muted-foreground">Target Style</p>
               <Select value={selectedStyle} onValueChange={setSelectedStyle}>
-                <SelectTrigger>
+                <SelectTrigger className="bg-muted/50 border-border/50">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="glass-card-static">
                   {STYLES.map((s) => (
                     <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                   ))}
@@ -315,7 +285,7 @@ const Design2DTab = () => {
       </div>
 
       {/* Chat Interface */}
-      <Card className="flex flex-col" style={{ height: "480px" }}>
+      <Card className="flex flex-col glass-card-static" style={{ height: "480px" }}>
         <ScrollArea ref={scrollRef} className="flex-1 p-4">
           <div className="space-y-4">
             {chatHistory.map((msg, i) => (
@@ -330,7 +300,7 @@ const Design2DTab = () => {
                 <div
                   className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                     msg.role === "ai"
-                      ? "rounded-tl-sm bg-muted text-foreground"
+                      ? "rounded-tl-sm bg-muted/60 text-foreground backdrop-blur-sm"
                       : "rounded-tr-sm bg-primary text-primary-foreground"
                   }`}
                 >
@@ -346,23 +316,22 @@ const Design2DTab = () => {
                     </p>
                   ))}
                   {msg.imageUrl && (
-                    <img src={msg.imageUrl} alt="Generated" className="mt-3 rounded-lg border border-border" />
+                    <img src={msg.imageUrl} alt="Generated" className="mt-3 rounded-lg border border-border/30" />
                   )}
                 </div>
               </div>
             ))}
 
-            {/* Typing indicator */}
             {(isTyping || isAnalyzing || isGenerating) && (
               <div className="flex gap-2.5">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
                   <Bot className="h-3.5 w-3.5" />
                 </div>
-                <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-3">
+                <div className="rounded-2xl rounded-tl-sm bg-muted/60 px-4 py-3 backdrop-blur-sm">
                   <div className="flex gap-1">
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "0ms" }} />
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "150ms" }} />
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "300ms" }} />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-primary/50" style={{ animationDelay: "0ms" }} />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-primary/50" style={{ animationDelay: "150ms" }} />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-primary/50" style={{ animationDelay: "300ms" }} />
                   </div>
                 </div>
               </div>
@@ -370,44 +339,42 @@ const Design2DTab = () => {
           </div>
         </ScrollArea>
 
-        {/* Feedback buttons */}
         {awaitingFeedback && (
-          <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
+          <div className="flex items-center gap-2 border-t border-border/30 px-4 py-2.5">
             <span className="text-xs text-muted-foreground">Is this good?</span>
-            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => handleFeedback(true)}>
+            <Button size="sm" variant="outline" className="gap-1.5 border-border/50 hover:border-primary/30" onClick={() => handleFeedback(true)}>
               <ThumbsUp className="h-3.5 w-3.5" /> Yes!
             </Button>
-            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => handleFeedback(false)}>
+            <Button size="sm" variant="outline" className="gap-1.5 border-border/50 hover:border-primary/30" onClick={() => handleFeedback(false)}>
               <ThumbsDown className="h-3.5 w-3.5" /> Not yet
             </Button>
           </div>
         )}
 
-        {/* Input bar */}
-        <div className="flex items-center gap-2 border-t border-border p-3">
+        <div className="flex items-center gap-2 border-t border-border/30 p-3">
           <Input
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChatSubmit()}
             placeholder="Type 'analyze', 'redesign', or describe what you want..."
             disabled={isGenerating || isAnalyzing}
-            className="flex-1"
+            className="flex-1 bg-muted/30 border-border/50 focus:border-primary/50"
           />
           <Button
             size="icon"
             onClick={handleChatSubmit}
             disabled={!inputMessage.trim() || isGenerating || isAnalyzing}
+            className="btn-premium h-9 w-9"
           >
-            {isGenerating || isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {isGenerating || isAnalyzing ? <div className="orange-spinner h-4 w-4" /> : <Send className="h-4 w-4" />}
           </Button>
         </div>
       </Card>
 
-      {/* Generated image preview (large) */}
       {generatedImageUrl && (
-        <Card>
+        <Card className="glass-card-static overflow-hidden">
           <CardHeader className="pb-3">
-            <CardTitle className="font-display text-lg">Generated Design</CardTitle>
+            <CardTitle className="font-display text-lg text-foreground">Generated Design</CardTitle>
           </CardHeader>
           <CardContent>
             <img src={generatedImageUrl} alt="Generated design" className="w-full rounded-lg" />
