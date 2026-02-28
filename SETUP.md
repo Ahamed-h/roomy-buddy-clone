@@ -149,8 +149,15 @@ The server exposes:
 | `/` | GET | Health check |
 | `/health` | GET | Simple health check |
 | `/analyze` | POST | Upload room image → full analysis JSON |
+| `/design/enhance_prompt` | POST | Enhance a redesign prompt with evaluation data |
+| `/design/generate/2d/repaint` | POST | Generate a 2D room redesign |
+| `/design/chat` | POST | Conversational AI design assistant |
 
-### 3e. Changing the Server URL
+### 3e. Design Studio — "Add Evaluation Result?"
+
+In the 2D Design tab, the **"Add evaluation result?"** toggle controls whether your room's ML analysis data (aesthetic score, detected style, recommendations) is included when generating redesigns. When enabled, the AI uses your evaluation to produce more context-aware results. Run analysis first, then toggle this on before requesting a redesign.
+
+### 3f. Changing the Server URL
 
 Users can change the backend URL in the Evaluate page settings. The default is stored in `localStorage` under `roomform_hf_url`.
 
