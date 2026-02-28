@@ -10,12 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
 import {
-  Upload, Settings, BarChart3, Eye, Palette, Sparkles, ArrowRight,
+  Upload, Settings, BarChart3, Eye, Sparkles, ArrowRight,
   Download, Info, Loader2, ImageIcon
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis
+  PieChart, Pie, Cell
 } from "recharts";
 import { analyzeRoom, getMockResult, getHfSpacesUrl, setHfSpacesUrl, type AnalysisResult } from "@/services/api";
 
@@ -53,14 +53,13 @@ const Evaluate = () => {
     try {
       const data = await analyzeRoom(image);
       setResult(data);
-      // Store for Design Studio
       sessionStorage.setItem("aivo_analysis", JSON.stringify(data));
       if (imagePreview) sessionStorage.setItem("aivo_image", imagePreview);
       toast({ title: "Analysis complete!", description: "Your room has been evaluated." });
     } catch {
       toast({
         title: "Using demo data",
-        description: "HF Spaces not connected. Showing mock analysis results.",
+        description: "Backend not connected. Showing mock analysis results.",
       });
       const mock = getMockResult();
       setResult(mock);
@@ -71,7 +70,7 @@ const Evaluate = () => {
     }
   };
 
-  const metricsData = result
+  const metricsData = result?.design_metrics
     ? Object.entries(result.design_metrics).map(([key, value]) => ({
         name: key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
         value: value as number,
@@ -79,12 +78,18 @@ const Evaluate = () => {
       }))
     : [];
 
-  const styleData = result
+  const styleData = result?.top_styles
     ? result.top_styles.map((s) => ({ name: s.style, score: Math.round(s.score * 100) }))
     : [];
 
-  const materialData = result
+  const materialData = result?.material_distribution
     ? Object.entries(result.material_distribution).map(([name, value]) => ({ name, value }))
+    : [];
+
+  const styleScoresData = result?.style_match_scores
+    ? Object.entries(result.style_match_scores)
+        .sort(([, a], [, b]) => (b as number) - (a as number))
+        .map(([style, score]) => ({ style, score: Math.round((score as number) * 100) }))
     : [];
 
   return (
@@ -111,14 +116,14 @@ const Evaluate = () => {
                 <Input
                   value={hfUrl}
                   onChange={(e) => setHfUrl(e.target.value)}
-                  placeholder="http://localhost:7860"
+                  placeholder="http://localhost:8000"
                 />
                 <Button onClick={() => { setHfSpacesUrl(hfUrl); toast({ title: "Saved!" }); }}>
                   Save
                 </Button>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Your local ML server URL. Default: http://localhost:7860. See the About page for setup instructions.
+                Your local ML server URL. Default: http://localhost:8000.
               </p>
             </CardContent>
           </Card>
@@ -141,14 +146,14 @@ const Evaluate = () => {
                     </Button>
                     <Button onClick={runAnalysis} disabled={loading}>
                       {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                      {loading ? "Analyzing..." : "Run AI Analysis"}
+                      {loading ? "Analyzing..." : "Run AI Evaluation"}
                     </Button>
                   </div>
                 </div>
               ) : (
                 <>
                   <Upload className="mb-4 h-12 w-12 text-muted-foreground" />
-                  <h3 className="font-display text-xl font-semibold">Upload your room photo</h3>
+                  <h2 className="font-display text-xl font-semibold">Upload your room photo</h2>
                   <p className="mt-2 text-sm text-muted-foreground">Drag & drop or click to browse. JPG/PNG, up to 10MB.</p>
                   <label className="mt-4 cursor-pointer">
                     <Button asChild><span>Choose File</span></Button>
@@ -184,7 +189,7 @@ const Evaluate = () => {
             </div>
 
             {/* Metric Cards */}
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
                 <CardContent className="pt-6">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -209,9 +214,19 @@ const Evaluate = () => {
                   <p className="mt-2 font-display text-4xl font-bold">{result.objects.length}</p>
                 </CardContent>
               </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <ImageIcon className="h-4 w-4" /> Depth Map
+                  </div>
+                  <p className="mt-2 text-sm font-medium text-muted-foreground">
+                    {result.depth_map?.length ? "Depth map available" : "Not available"}
+                  </p>
+                </CardContent>
+              </Card>
             </div>
 
-            {/* Room photo + preview */}
+            {/* Room photo */}
             {imagePreview && (
               <Card>
                 <CardContent className="pt-6">
@@ -232,7 +247,7 @@ const Evaluate = () => {
               <TabsContent value="style" className="space-y-6">
                 <div className="grid gap-6 lg:grid-cols-2">
                   <Card>
-                    <CardHeader><CardTitle className="font-display">Style Traits</CardTitle></CardHeader>
+                    <CardHeader><CardTitle className="font-display text-lg">Style Traits</CardTitle></CardHeader>
                     <CardContent className="space-y-3">
                       {Object.entries(result.style_traits).map(([trait, value]) => (
                         <div key={trait}>
@@ -246,17 +261,42 @@ const Evaluate = () => {
                     </CardContent>
                   </Card>
                   <Card>
-                    <CardHeader><CardTitle className="font-display">Top Style Matches</CardTitle></CardHeader>
+                    <CardHeader><CardTitle className="font-display text-lg">Style Match Scores</CardTitle></CardHeader>
                     <CardContent>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <BarChart data={styleData} layout="vertical">
-                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                          <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 12 }} />
-                          <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
-                          <Tooltip />
-                          <Bar dataKey="score" fill="hsl(152,60%,42%)" radius={[0, 4, 4, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
+                      {styleScoresData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={250}>
+                          <BarChart data={styleScoresData} layout="vertical">
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                            <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 12 }} />
+                            <YAxis dataKey="style" type="category" width={100} tick={{ fontSize: 12 }} />
+                            <Tooltip />
+                            <Bar dataKey="score" fill="hsl(152,60%,42%)" radius={[0, 4, 4, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : styleData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={250}>
+                          <BarChart data={styleData} layout="vertical">
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                            <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 12 }} />
+                            <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
+                            <Tooltip />
+                            <Bar dataKey="score" fill="hsl(152,60%,42%)" radius={[0, 4, 4, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No style data available.</p>
+                      )}
+                      {/* Possible styles badges */}
+                      {result.possible_styles?.length > 0 && (
+                        <div className="mt-4">
+                          <h4 className="mb-2 text-sm font-medium">Possible Styles</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {result.possible_styles.map((s) => (
+                              <Badge key={s} variant="secondary">{s}</Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </div>
@@ -266,7 +306,7 @@ const Evaluate = () => {
               <TabsContent value="objects" className="space-y-6">
                 <div className="grid gap-6 lg:grid-cols-3">
                   <Card className="lg:col-span-2">
-                    <CardHeader><CardTitle className="font-display">Detected Objects</CardTitle></CardHeader>
+                    <CardHeader><CardTitle className="font-display text-lg">Detected Objects</CardTitle></CardHeader>
                     <CardContent>
                       <div className="overflow-x-auto">
                         <table className="w-full text-sm">
@@ -282,10 +322,10 @@ const Evaluate = () => {
                           <tbody>
                             {result.objects.map((obj, i) => (
                               <tr key={i} className="border-b border-border/50">
-                                <td className="p-2 capitalize font-medium">{obj.label}</td>
+                                <td className="p-2 capitalize font-medium">{obj.name}</td>
                                 <td className="p-2">{(obj.confidence * 100).toFixed(0)}%</td>
                                 <td className="p-2"><Badge variant="secondary" className="capitalize">{obj.material}</Badge></td>
-                                <td className="p-2">{obj.distance.toFixed(1)}m</td>
+                                <td className="p-2">{obj.distance_m.toFixed(1)}m</td>
                                 <td className="p-2"><Badge variant="outline">{obj.source}</Badge></td>
                               </tr>
                             ))}
@@ -295,7 +335,7 @@ const Evaluate = () => {
                     </CardContent>
                   </Card>
                   <Card>
-                    <CardHeader><CardTitle className="font-display">Materials</CardTitle></CardHeader>
+                    <CardHeader><CardTitle className="font-display text-lg">Materials</CardTitle></CardHeader>
                     <CardContent>
                       <ResponsiveContainer width="100%" height={220}>
                         <PieChart>
@@ -315,9 +355,9 @@ const Evaluate = () => {
               {/* Metrics Tab */}
               <TabsContent value="metrics">
                 <Card>
-                  <CardHeader><CardTitle className="font-display">Design Metrics (13)</CardTitle></CardHeader>
+                  <CardHeader><CardTitle className="font-display text-lg">Design Metrics</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
-                    {metricsData.map((m) => (
+                    {metricsData.length > 0 ? metricsData.map((m) => (
                       <div key={m.name}>
                         <div className="flex justify-between text-sm">
                           <span>{m.name}</span>
@@ -325,7 +365,9 @@ const Evaluate = () => {
                         </div>
                         <Progress value={m.value * 10} className="mt-1 h-2" />
                       </div>
-                    ))}
+                    )) : (
+                      <p className="text-sm text-muted-foreground">No design metrics available.</p>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -333,7 +375,7 @@ const Evaluate = () => {
               {/* Tips Tab */}
               <TabsContent value="tips">
                 <Card>
-                  <CardHeader><CardTitle className="font-display">AI Recommendations</CardTitle></CardHeader>
+                  <CardHeader><CardTitle className="font-display text-lg">AI Recommendations</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
                     {result.recommendations.map((tip, i) => (
                       <div key={i} className="flex gap-3 rounded-lg border border-border bg-muted/30 p-4">
