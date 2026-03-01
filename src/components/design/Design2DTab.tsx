@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Sparkles, Send, Loader2, ImageIcon, ThumbsUp, ThumbsDown, Bot, User, TrendingUp } from "lucide-react";
 import { getHfSpacesUrl } from "@/services/api";
+import { supabase } from "@/integrations/supabase/client";
 
 
 interface ChatMessage {
@@ -22,7 +23,7 @@ const Design2DTab = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const API = getHfSpacesUrl();
 
-  const [sessionId] = useState(() => crypto.randomUUID());
+  // sessionId removed — chat now uses Supabase edge function
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState("");
   const [currentImage, setCurrentImage] = useState<File | null>(null);
@@ -169,21 +170,61 @@ const Design2DTab = () => {
     }
     setIsTyping(true);
     try {
-      const resp = await fetch(`${API}/design/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, message: msg }),
+      // Use Supabase edge function for AI chat (Gemini via Lovable AI gateway)
+      const roomContext = evaluationResult || null;
+      const { data: streamData, error } = await supabase.functions.invoke("design-chat", {
+        body: {
+          messages: [
+            ...chatHistory
+              .filter((m) => m.content)
+              .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content })),
+            { role: "user", content: msg },
+          ],
+          roomContext,
+        },
       });
-      if (!resp.ok) throw new Error(`Chat failed: ${resp.status}`);
-      const data = await resp.json();
-      addMessage("ai", data.response || "I'm not sure how to help with that. Try asking about room design!");
-      if (data.action === "generate") {
-        await runRedesign(data.params?.style || "modern");
-      } else if (data.action === "analyze") {
-        await runAnalysis();
+
+      if (error) throw error;
+
+      // Handle streaming response - read the full text
+      let aiResponse = "";
+      if (streamData instanceof ReadableStream) {
+        const reader = streamData.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value);
+          // Parse SSE lines
+          for (const line of chunk.split("\n")) {
+            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+              try {
+                const json = JSON.parse(line.slice(6));
+                const delta = json.choices?.[0]?.delta?.content;
+                if (delta) aiResponse += delta;
+              } catch {}
+            }
+          }
+        }
+      } else if (typeof streamData === "string") {
+        aiResponse = streamData;
+      } else if (streamData?.error) {
+        throw new Error(streamData.error);
       }
-    } catch {
-      addMessage("ai", "I couldn't reach the chat server. You can still:\n• Type `analyze` to evaluate your photo\n• Type `redesign` to generate a new design\n• Pick a style from the dropdown and say `redesign`");
+
+      if (aiResponse) {
+        addMessage("ai", aiResponse);
+        // Check for furniture JSON block
+        const furnitureMatch = aiResponse.match(/```furniture\n([\s\S]*?)\n```/);
+        if (furnitureMatch) {
+          toast({ title: "Furniture suggestion detected!", description: "Open the 3D Studio to add it." });
+        }
+      } else {
+        addMessage("ai", "I'm not sure how to help with that. Try asking about room design!");
+      }
+    } catch (err) {
+      console.error("Chat error:", err);
+      addMessage("ai", `Chat error: ${err instanceof Error ? err.message : "Unknown error"}. You can still:\n• Type \`analyze\` to evaluate your photo\n• Type \`redesign\` to generate a new design`);
     } finally {
       setIsTyping(false);
     }

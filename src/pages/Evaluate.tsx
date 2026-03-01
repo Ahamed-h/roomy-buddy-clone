@@ -12,7 +12,7 @@ import {
   Upload, Settings, BarChart3, Eye, Sparkles, ArrowRight,
   Download, Info, Loader2, ImageIcon, Layers, Save
 } from "lucide-react";
-import { analyzeRoom, getMockResult, getHfSpacesUrl, setHfSpacesUrl, type AnalysisResult } from "@/services/api";
+import { analyzeRoom, getHfSpacesUrl, setHfSpacesUrl, type AnalysisResult } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { saveDesign } from "@/lib/designs";
 
@@ -55,13 +55,12 @@ const Evaluate = () => {
     } catch (err) {
       console.error("Analysis fetch error:", err);
       toast({
-        title: "Using demo data",
-        description: `Backend not reachable (${err instanceof Error ? err.message : "unknown error"}). Showing mock results.`,
+        title: "Analysis failed",
+        description: `Could not reach backend at ${getHfSpacesUrl()}. Error: ${err instanceof Error ? err.message : "unknown"}. Check Settings to verify the URL.`,
+        variant: "destructive",
       });
-      const mock = getMockResult();
-      setResult(mock);
-      sessionStorage.setItem("aivo_analysis", JSON.stringify(mock));
-      if (imagePreview) sessionStorage.setItem("aivo_image", imagePreview);
+      setLoading(false);
+      return;
     } finally {
       setLoading(false);
     }
