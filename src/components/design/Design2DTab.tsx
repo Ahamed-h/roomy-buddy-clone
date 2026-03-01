@@ -1,20 +1,18 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Wand2, Download, Loader2, CheckCircle2 } from "lucide-react";
+import { Upload, Wand2, Download, Loader2, CheckCircle2, Send, Bot, User } from "lucide-react";
 import { getHfSpacesUrl } from "@/services/api";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 
 const ROOM_TYPES = ["Bedroom", "Living Room", "Kitchen", "Bathroom", "Dining Room", "Office", "Kids Room"];
-
-const QUALITY_OPTIONS = [
-  { value: "fast", label: "Fast (Standard) – 1 credit" },
-  { value: "hd", label: "HD (High Quality) – 2 credits" },
-];
 
 const THEMES = [
   { id: "modern", label: "Modern" },
@@ -33,23 +31,45 @@ const THEMES = [
 
 const MAX_THEMES = 4;
 
+interface ChatMessage {
+  role: "user" | "ai";
+  content: string;
+  imageUrl?: string;
+}
+
 const Design2DTab = () => {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const API = getHfSpacesUrl();
 
   const [currentImage, setCurrentImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [roomType, setRoomType] = useState("Bedroom");
-  const [quality, setQuality] = useState("fast");
   const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [generatedLabel, setGeneratedLabel] = useState<string>("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [includeEvaluation, setIncludeEvaluation] = useState(true);
   const [pipelineStep, setPipelineStep] = useState<string | null>(null);
+
+  // Chat state
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
+    { role: "ai", content: "Hi! 👋 Upload a room photo and select your preferred themes. I can help you refine your style — just tell me what you're looking for!" },
+  ]);
+  const [inputMessage, setInputMessage] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [chatHistory, isTyping]);
+
+  const addMessage = useCallback((role: "user" | "ai", content: string, imageUrl?: string) => {
+    setChatHistory((prev) => [...prev, { role, content, imageUrl }]);
+  }, []);
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -71,7 +91,7 @@ const Design2DTab = () => {
     const b64 = await fileToBase64(file);
     setImageBase64(b64);
 
-    // Auto-analyze
+    addMessage("ai", "Great photo! Analyzing your room...");
     await runAnalysis(file);
   };
 
@@ -86,21 +106,21 @@ const Design2DTab = () => {
       const data = await resp.json();
       setAnalysisResult(data);
 
-      // Auto-run AI verification
+      // Auto AI verify
       setPipelineStep("AI verifying results...");
       try {
         const b64 = await fileToBase64(file);
         const { data: verified, error } = await supabase.functions.invoke("verify-analysis", {
           body: { analysisResult: data, imageBase64: b64 },
         });
-        if (!error && verified?.corrected) {
-          setAnalysisResult(verified.corrected);
-        }
+        if (!error && verified?.corrected) setAnalysisResult(verified.corrected);
       } catch {}
 
-      toast({ title: "Room analyzed!", description: "Select themes and generate your redesign." });
+      const topStyles = data.possible_styles?.slice(0, 3).join(", ") || "mixed";
+      const objectNames = data.objects?.map((o: any) => o.name || o.label).slice(0, 6).join(", ") || "none detected";
+      addMessage("ai", `✅ **Analysis complete!**\n\n**Style:** ${topStyles}\n**Objects:** ${objectNames}\n**Score:** ${data.aesthetic_score}/10\n\nNow select themes and tell me any preferences — colors, mood, specific furniture?`);
     } catch {
-      toast({ title: "Analysis skipped", description: "Describe your room with themes instead.", variant: "destructive" });
+      addMessage("ai", "⚠️ Analysis unavailable — no worries! Select themes and I'll generate a redesign directly.");
     } finally {
       setIsAnalyzing(false);
       setPipelineStep(null);
@@ -115,11 +135,11 @@ const Design2DTab = () => {
     });
   }, []);
 
-  const buildSmartPrompt = async (): Promise<string> => {
+  const buildSmartPrompt = async (extraNotes: string = ""): Promise<string> => {
     const themeStr = selectedThemes.map((id) => THEMES.find((t) => t.id === id)?.label).filter(Boolean).join(", ");
-    const userStyle = `${themeStr} style ${roomType.toLowerCase()}`;
+    const userStyle = `${themeStr} style ${roomType.toLowerCase()}${extraNotes ? `. User notes: ${extraNotes}` : ""}`;
 
-    if (analysisResult) {
+    if (includeEvaluation && analysisResult) {
       try {
         const resp = await fetch(`${API}/design/enhance_prompt`, {
           method: "POST",
@@ -133,10 +153,10 @@ const Design2DTab = () => {
       } catch {}
 
       const objects = analysisResult.objects?.map((o: any) => o.name).slice(0, 5).join(", ") || "";
-      return `Redesign this ${roomType.toLowerCase()} in a ${themeStr} style. Current objects: ${objects}. Keep room layout, transform the aesthetic. Photorealistic.`;
+      return `Redesign this ${roomType.toLowerCase()} in a ${themeStr} style. ${extraNotes ? extraNotes + ". " : ""}Current objects: ${objects}. Keep room layout, transform the aesthetic. Photorealistic.`;
     }
 
-    return `Redesign this ${roomType.toLowerCase()} in a ${themeStr} style. Make it photorealistic and keep the room layout.`;
+    return `Redesign this ${roomType.toLowerCase()} in a ${themeStr} style. ${extraNotes ? extraNotes + ". " : ""}Make it photorealistic and keep the room layout.`;
   };
 
   const handleGenerate = async () => {
@@ -146,15 +166,20 @@ const Design2DTab = () => {
     }
 
     setIsGenerating(true);
+    const themeLabel = selectedThemes.map((id) => THEMES.find((t) => t.id === id)?.label).join(" + ");
+    setGeneratedLabel(`${themeLabel} ${roomType}`);
+
+    // Gather user chat notes as extra context
+    const userNotes = chatHistory.filter((m) => m.role === "user").map((m) => m.content).slice(-3).join("; ");
+
     setPipelineStep("Building smart prompt...");
+    addMessage("ai", "🎨 Generating your redesign...");
 
     try {
-      const prompt = await buildSmartPrompt();
-      const themeLabel = selectedThemes.map((id) => THEMES.find((t) => t.id === id)?.label).join(" + ");
-      setGeneratedLabel(`${themeLabel} ${roomType}`);
+      const prompt = await buildSmartPrompt(userNotes);
 
-      // Try local backend first
-      setPipelineStep("Generating redesign (local)...");
+      // Try local first
+      setPipelineStep("Generating (local)...");
       try {
         const fd = new FormData();
         fd.append("file", currentImage);
@@ -164,13 +189,14 @@ const Design2DTab = () => {
           const data = await resp.json();
           if (data.image_url) {
             setGeneratedImageUrl(data.image_url);
+            addMessage("ai", "Here's your redesign! 👇 What do you think?", data.image_url);
             return;
           }
         }
       } catch {}
 
-      // Fallback: Cloud
-      setPipelineStep("Generating redesign (cloud)...");
+      // Fallback cloud
+      setPipelineStep("Generating (cloud)...");
       const b64 = imageBase64 || await fileToBase64(currentImage);
       const { data, error } = await supabase.functions.invoke("generate-image", {
         body: { prompt, imageBase64: b64 },
@@ -178,14 +204,68 @@ const Design2DTab = () => {
       if (error) throw error;
       if (data?.image_url) {
         setGeneratedImageUrl(data.image_url);
+        addMessage("ai", "Here's your **AI-generated** redesign! 👇 Want changes?", data.image_url);
       } else {
-        toast({ title: "Generation failed", description: "Try different themes.", variant: "destructive" });
+        addMessage("ai", "❌ Generation didn't produce a result. Try different themes.");
       }
     } catch (err: any) {
-      toast({ title: "Generation failed", description: err.message, variant: "destructive" });
+      addMessage("ai", `❌ Generation failed: ${err.message}`);
     } finally {
       setIsGenerating(false);
       setPipelineStep(null);
+    }
+  };
+
+  const handleChatSubmit = async () => {
+    const msg = inputMessage.trim();
+    if (!msg) return;
+    setInputMessage("");
+    addMessage("user", msg);
+
+    // Use edge function for chat
+    setIsTyping(true);
+    try {
+      const roomContext = includeEvaluation ? analysisResult : null;
+      const { data: streamData, error } = await supabase.functions.invoke("design-chat", {
+        body: {
+          messages: [
+            ...chatHistory.filter((m) => m.content).map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content })),
+            { role: "user", content: msg },
+          ],
+          roomContext,
+        },
+      });
+      if (error) throw error;
+
+      let aiResponse = "";
+      if (streamData instanceof ReadableStream) {
+        const reader = streamData.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value);
+          for (const line of chunk.split("\n")) {
+            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+              try {
+                const json = JSON.parse(line.slice(6));
+                const delta = json.choices?.[0]?.delta?.content;
+                if (delta) aiResponse += delta;
+              } catch {}
+            }
+          }
+        }
+      } else if (typeof streamData === "string") {
+        aiResponse = streamData;
+      } else if (streamData?.error) {
+        throw new Error(streamData.error);
+      }
+
+      addMessage("ai", aiResponse || "I'm not sure how to help with that. Try describing what you'd like!");
+    } catch (err) {
+      addMessage("ai", `Chat error: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setIsTyping(false);
     }
   };
 
@@ -200,13 +280,11 @@ const Design2DTab = () => {
   return (
     <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
       {/* ── Left Sidebar ── */}
-      <div className="space-y-5">
+      <div className="space-y-4">
         {/* Upload */}
         <Card className="glass-card-static">
           <CardContent className="p-4 space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Upload a photo of your room
-            </Label>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upload a photo of your room</Label>
             <label className="flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-border/50 p-3 transition-all hover:border-primary/40 hover:bg-muted/20">
               {imagePreview ? (
                 <img src={imagePreview} alt="Room" className="h-20 w-full rounded-md object-cover" />
@@ -218,9 +296,6 @@ const Design2DTab = () => {
               )}
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
             </label>
-            {imagePreview && (
-              <p className="text-[10px] text-muted-foreground truncate">{currentImage?.name}</p>
-            )}
             {isAnalyzing && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="h-3 w-3 animate-spin" /> Analyzing...
@@ -237,47 +312,33 @@ const Design2DTab = () => {
         {/* Room Type */}
         <Card className="glass-card-static">
           <CardContent className="p-4 space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Select Room Type
-            </Label>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Select Room Type</Label>
             <Select value={roomType} onValueChange={setRoomType}>
-              <SelectTrigger className="bg-muted/30 border-border/50">
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger className="bg-muted/30 border-border/50"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {ROOM_TYPES.map((r) => (
-                  <SelectItem key={r} value={r}>{r}</SelectItem>
-                ))}
+                {ROOM_TYPES.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}
               </SelectContent>
             </Select>
           </CardContent>
         </Card>
 
-        {/* Quality */}
+        {/* Add Evaluation Result toggle */}
         <Card className="glass-card-static">
-          <CardContent className="p-4 space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Select Quality
+          <CardContent className="flex items-center gap-3 p-4">
+            <Switch id="include-eval" checked={includeEvaluation} onCheckedChange={setIncludeEvaluation} />
+            <Label htmlFor="include-eval" className="text-sm font-medium text-foreground cursor-pointer">
+              Add evaluation result?
             </Label>
-            <Select value={quality} onValueChange={setQuality}>
-              <SelectTrigger className="bg-muted/30 border-border/50">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {QUALITY_OPTIONS.map((q) => (
-                  <SelectItem key={q.value} value={q.value}>{q.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {!analysisResult && includeEvaluation && (
+              <span className="text-[10px] text-muted-foreground ml-auto">(Upload to analyze)</span>
+            )}
           </CardContent>
         </Card>
 
         {/* Themes */}
         <Card className="glass-card-static">
           <CardContent className="p-4 space-y-3">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Select Room Themes (up to {MAX_THEMES})
-            </Label>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Select Room Themes (up to {MAX_THEMES})</Label>
             <div className="grid grid-cols-3 gap-2">
               {THEMES.map((theme) => {
                 const selected = selectedThemes.includes(theme.id);
@@ -289,9 +350,7 @@ const Design2DTab = () => {
                     disabled={disabled}
                     className={cn(
                       "rounded-lg border px-2 py-2 text-xs font-medium transition-all",
-                      selected
-                        ? "border-primary bg-primary/15 text-primary"
-                        : "border-border/50 bg-muted/20 text-muted-foreground hover:border-primary/30 hover:bg-muted/40",
+                      selected ? "border-primary bg-primary/15 text-primary" : "border-border/50 bg-muted/20 text-muted-foreground hover:border-primary/30 hover:bg-muted/40",
                       disabled && "opacity-40 cursor-not-allowed"
                     )}
                   >
@@ -303,7 +362,7 @@ const Design2DTab = () => {
           </CardContent>
         </Card>
 
-        {/* Generate Button */}
+        {/* Generate */}
         <Button
           onClick={handleGenerate}
           disabled={!currentImage || selectedThemes.length === 0 || isGenerating}
@@ -311,69 +370,104 @@ const Design2DTab = () => {
           size="lg"
         >
           {isGenerating ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {pipelineStep || "Generating..."}
-            </>
+            <><Loader2 className="h-4 w-4 animate-spin" />{pipelineStep || "Generating..."}</>
           ) : (
-            <>
-              <Wand2 className="h-4 w-4" /> Redesign room
-            </>
+            <><Wand2 className="h-4 w-4" /> Redesign room</>
           )}
         </Button>
       </div>
 
-      {/* ── Right Panel: Image Display ── */}
-      <Card className="glass-card-static flex flex-col items-center justify-center min-h-[480px]">
-        <CardContent className="flex flex-col items-center gap-4 p-6 w-full">
-          {generatedImageUrl ? (
-            <>
-              <img
-                src={generatedImageUrl}
-                alt="Redesigned room"
-                className="w-full max-h-[520px] rounded-xl object-contain"
-              />
-              {generatedLabel && (
-                <p className="text-sm font-medium text-muted-foreground">{generatedLabel}</p>
-              )}
-              <div className="flex gap-3">
-                <Button onClick={handleGenerate} disabled={isGenerating} className="btn-premium gap-2">
-                  <Wand2 className="h-4 w-4" /> Redesign new room
-                </Button>
-                <Button variant="outline" onClick={handleDownload} className="gap-2 border-border/50 hover:border-primary/30">
-                  <Download className="h-4 w-4" /> Download photo
-                </Button>
-              </div>
-            </>
-          ) : imagePreview ? (
-            <>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Original Room
-              </Label>
-              <img
-                src={imagePreview}
-                alt="Original room"
-                className="w-full max-h-[420px] rounded-xl object-contain"
-              />
-              <p className="text-sm text-muted-foreground text-center max-w-md">
-                Select themes on the left and click <strong>"Redesign room"</strong> to generate your new design.
-              </p>
-            </>
-          ) : (
-            <div className="flex flex-col items-center gap-3 py-16 text-center">
-              <Upload className="h-12 w-12 text-muted-foreground/40" />
-              <div>
+      {/* ── Right Panel ── */}
+      <div className="flex flex-col gap-4">
+        {/* Image Display */}
+        <Card className="glass-card-static flex flex-col items-center justify-center min-h-[320px]">
+          <CardContent className="flex flex-col items-center gap-4 p-6 w-full">
+            {generatedImageUrl ? (
+              <>
+                <img src={generatedImageUrl} alt="Redesigned room" className="w-full max-h-[420px] rounded-xl object-contain" />
+                {generatedLabel && <p className="text-sm font-medium text-muted-foreground">{generatedLabel}</p>}
+                <div className="flex gap-3">
+                  <Button onClick={handleGenerate} disabled={isGenerating} className="btn-premium gap-2">
+                    <Wand2 className="h-4 w-4" /> Redesign new room
+                  </Button>
+                  <Button variant="outline" onClick={handleDownload} className="gap-2 border-border/50 hover:border-primary/30">
+                    <Download className="h-4 w-4" /> Download photo
+                  </Button>
+                </div>
+              </>
+            ) : imagePreview ? (
+              <>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Original Room</Label>
+                <img src={imagePreview} alt="Original room" className="w-full max-h-[320px] rounded-xl object-contain" />
+                <p className="text-sm text-muted-foreground text-center">Select themes and click <strong>"Redesign room"</strong></p>
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-12 text-center">
+                <Upload className="h-12 w-12 text-muted-foreground/40" />
                 <p className="text-lg font-display font-semibold text-foreground">
                   Redesign your <span className="text-primary">room</span> in seconds
                 </p>
-                <p className="mt-1 text-sm text-muted-foreground max-w-sm">
-                  Upload a room, specify the room type, and select your room theme to redesign.
-                </p>
+                <p className="text-sm text-muted-foreground max-w-sm">Upload a room, specify the type, and select themes to redesign.</p>
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Chatbot */}
+        <Card className="glass-card-static flex flex-col" style={{ height: "320px" }}>
+          <div className="px-4 py-2.5 border-b border-border/30">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">💬 Style Assistant</p>
+          </div>
+          <ScrollArea ref={scrollRef} className="flex-1 p-3">
+            <div className="space-y-3">
+              {chatHistory.map((msg, i) => (
+                <div key={i} className={`flex gap-2 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+                  <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${msg.role === "ai" ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"}`}>
+                    {msg.role === "ai" ? <Bot className="h-3 w-3" /> : <User className="h-3 w-3" />}
+                  </div>
+                  <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${msg.role === "ai" ? "rounded-tl-sm bg-muted/60 text-foreground" : "rounded-tr-sm bg-primary text-primary-foreground"}`}>
+                    {msg.content.split("\n").map((line, j) => (
+                      <p key={j} className={j > 0 ? "mt-1" : ""}>
+                        {line.split(/(\*\*.*?\*\*)/).map((part, k) => {
+                          if (!part) return null;
+                          if (part.startsWith("**") && part.endsWith("**")) return <strong key={k}>{part.slice(2, -2)}</strong>;
+                          return <span key={k}>{part}</span>;
+                        })}
+                      </p>
+                    ))}
+                    {msg.imageUrl && <img src={msg.imageUrl} alt="Generated" className="mt-2 rounded-lg border border-border/30 max-h-48 object-contain" />}
+                  </div>
+                </div>
+              ))}
+              {isTyping && (
+                <div className="flex gap-2">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"><Bot className="h-3 w-3" /></div>
+                  <div className="rounded-2xl rounded-tl-sm bg-muted/60 px-3 py-2">
+                    <div className="flex gap-1">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" style={{ animationDelay: "0ms" }} />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" style={{ animationDelay: "150ms" }} />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" style={{ animationDelay: "300ms" }} />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </ScrollArea>
+          <div className="flex items-center gap-2 border-t border-border/30 p-2.5">
+            <Input
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChatSubmit()}
+              placeholder="Ask for style suggestions..."
+              disabled={isGenerating || isAnalyzing}
+              className="flex-1 bg-muted/30 border-border/50 focus:border-primary/50 h-8 text-xs"
+            />
+            <Button size="icon" onClick={handleChatSubmit} disabled={!inputMessage.trim() || isTyping} className="btn-premium h-8 w-8">
+              {isTyping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 };
