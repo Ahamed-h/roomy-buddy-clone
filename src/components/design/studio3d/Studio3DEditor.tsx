@@ -1,10 +1,11 @@
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, ScanEye } from "lucide-react";
 import TopControlsBar from "./TopControlsBar";
 import FloorplanEditor from "./FloorplanEditor";
 import SceneViewer3D from "./SceneViewer3D";
 import FurnitureMarketplace from "./FurnitureMarketplace";
+import MidasReconstruction from "./MidasReconstruction";
 import { MOCK_ROOMS, MOCK_WALLS, MOCK_FURNITURE } from "./mockData";
 import type { Room, Wall, PlacedFurniture, FurnitureItem, EditMode } from "./types";
 import { useToast } from "@/hooks/use-toast";
@@ -125,6 +126,18 @@ const Studio3DEditor = () => {
               onUpdateFurniture={handleUpdateFurniture}
             />
           </div>
+        </div>
+      </div>
+
+      {/* MiDaS 3D Reconstruction */}
+      <div className="rounded-xl border border-white/10 bg-[#1e1e2e]/90 backdrop-blur-sm overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
+          <ScanEye className="h-4 w-4 text-[#4a90e2]" />
+          <span className="text-xs font-medium text-white/70">MiDaS 3D Reconstruction</span>
+          <span className="ml-1 rounded bg-[#4a90e2]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#4a90e2]">Depth → Point Cloud</span>
+        </div>
+        <div className="p-4">
+          <MidasReconstruction />
         </div>
       </div>
 
