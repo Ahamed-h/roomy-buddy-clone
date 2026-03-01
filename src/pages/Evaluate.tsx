@@ -52,10 +52,11 @@ const Evaluate = () => {
       sessionStorage.setItem("aivo_analysis", JSON.stringify(data));
       if (imagePreview) sessionStorage.setItem("aivo_image", imagePreview);
       toast({ title: "Analysis complete!", description: "Your room has been evaluated." });
-    } catch {
+    } catch (err) {
+      console.error("Analysis fetch error:", err);
       toast({
         title: "Using demo data",
-        description: "Backend not connected. Showing mock analysis results.",
+        description: `Backend not reachable (${err instanceof Error ? err.message : "unknown error"}). Showing mock results.`,
       });
       const mock = getMockResult();
       setResult(mock);
