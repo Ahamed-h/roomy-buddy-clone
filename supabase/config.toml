@@ -2,3 +2,9 @@ project_id = "whlzqtupucxeqkaqmcds"
 
 [functions.design-chat]
 verify_jwt = false
+
+[functions.verify-analysis]
+verify_jwt = false
+
+[functions.generate-image]
+verify_jwt = false
