@@ -7,9 +7,10 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Wand2, Download, Loader2, CheckCircle2, Send, Bot, User } from "lucide-react";
+import { Upload, Wand2, Download, Loader2, CheckCircle2, Send, Bot, User, Save } from "lucide-react";
 import { getHfSpacesUrl } from "@/services/api";
 import { supabase } from "@/integrations/supabase/client";
+import { saveDesign } from "@/lib/designs";
 import { cn } from "@/lib/utils";
 
 const ROOM_TYPES = ["Bedroom", "Living Room", "Kitchen", "Bathroom", "Dining Room", "Office", "Kids Room"];
@@ -55,10 +56,11 @@ const Design2DTab = () => {
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [includeEvaluation, setIncludeEvaluation] = useState(true);
   const [pipelineStep, setPipelineStep] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Chat state
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
-    { role: "ai", content: "Hi! 👋 Upload a room photo and select your preferred themes. I can help you refine your style — just tell me what you're looking for!" },
+    { role: "ai", content: "Hi! 👋 Upload a room photo and select your preferred themes. I can help you refine your style or modify the generated design — just tell me what you'd like to change!" },
   ]);
   const [inputMessage, setInputMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -106,7 +108,6 @@ const Design2DTab = () => {
       const data = await resp.json();
       setAnalysisResult(data);
 
-      // Auto AI verify
       setPipelineStep("AI verifying results...");
       try {
         const b64 = await fileToBase64(file);
@@ -118,9 +119,9 @@ const Design2DTab = () => {
 
       const topStyles = data.possible_styles?.slice(0, 3).join(", ") || "mixed";
       const objectNames = data.objects?.map((o: any) => o.name || o.label).slice(0, 6).join(", ") || "none detected";
-      addMessage("ai", `✅ **Analysis complete!**\n\n**Style:** ${topStyles}\n**Objects:** ${objectNames}\n**Score:** ${data.aesthetic_score}/10\n\nNow select themes and tell me any preferences — colors, mood, specific furniture?`);
+      addMessage("ai", `✅ **Analysis complete!**\n\n**Style:** ${topStyles}\n**Objects:** ${objectNames}\n**Score:** ${data.aesthetic_score}/10\n\nSelect themes and click Redesign, or tell me what changes you'd like!`);
     } catch {
-      addMessage("ai", "⚠️ Analysis unavailable — no worries! Select themes and I'll generate a redesign directly.");
+      addMessage("ai", "⚠️ Analysis unavailable — select themes and I'll generate a redesign directly.");
     } finally {
       setIsAnalyzing(false);
       setPipelineStep(null);
@@ -159,24 +160,20 @@ const Design2DTab = () => {
     return `Redesign this ${roomType.toLowerCase()} in a ${themeStr} style. ${extraNotes ? extraNotes + ". " : ""}Make it photorealistic and keep the room layout.`;
   };
 
-  const handleGenerate = async () => {
-    if (!currentImage || selectedThemes.length === 0) {
-      toast({ title: "Upload a photo and select at least one theme" });
+  const generateImage = async (extraNotes: string = "") => {
+    if (!currentImage) {
+      toast({ title: "Upload a photo first" });
       return;
     }
 
     setIsGenerating(true);
-    const themeLabel = selectedThemes.map((id) => THEMES.find((t) => t.id === id)?.label).join(" + ");
+    const themeLabel = selectedThemes.map((id) => THEMES.find((t) => t.id === id)?.label).join(" + ") || "Custom";
     setGeneratedLabel(`${themeLabel} ${roomType}`);
 
-    // Gather user chat notes as extra context
-    const userNotes = chatHistory.filter((m) => m.role === "user").map((m) => m.content).slice(-3).join("; ");
-
     setPipelineStep("Building smart prompt...");
-    addMessage("ai", "🎨 Generating your redesign...");
 
     try {
-      const prompt = await buildSmartPrompt(userNotes);
+      const prompt = await buildSmartPrompt(extraNotes);
 
       // Try local first
       setPipelineStep("Generating (local)...");
@@ -189,7 +186,7 @@ const Design2DTab = () => {
           const data = await resp.json();
           if (data.image_url) {
             setGeneratedImageUrl(data.image_url);
-            addMessage("ai", "Here's your redesign! 👇 What do you think?", data.image_url);
+            addMessage("ai", "Here's your redesign! 👇 Tell me if you'd like any changes.", data.image_url);
             return;
           }
         }
@@ -204,7 +201,7 @@ const Design2DTab = () => {
       if (error) throw error;
       if (data?.image_url) {
         setGeneratedImageUrl(data.image_url);
-        addMessage("ai", "Here's your **AI-generated** redesign! 👇 Want changes?", data.image_url);
+        addMessage("ai", "Here's your **AI-generated** redesign! 👇 Want any changes?", data.image_url);
       } else {
         addMessage("ai", "❌ Generation didn't produce a result. Try different themes.");
       }
@@ -216,13 +213,33 @@ const Design2DTab = () => {
     }
   };
 
+  const handleGenerate = async () => {
+    if (!currentImage || selectedThemes.length === 0) {
+      toast({ title: "Upload a photo and select at least one theme" });
+      return;
+    }
+    const userNotes = chatHistory.filter((m) => m.role === "user").map((m) => m.content).slice(-3).join("; ");
+    addMessage("ai", "🎨 Generating your redesign...");
+    await generateImage(userNotes);
+  };
+
   const handleChatSubmit = async () => {
     const msg = inputMessage.trim();
     if (!msg) return;
     setInputMessage("");
     addMessage("user", msg);
 
-    // Use edge function for chat
+    // Detect if the user wants to modify the image
+    const isModifyRequest = generatedImageUrl && /change|modify|make it|add|remove|replace|more|less|darker|lighter|brighter|warmer|cooler|different|try|redo|update|swap|put|move|adjust/i.test(msg);
+
+    if (isModifyRequest && currentImage) {
+      // Regenerate with the user's instruction as extra context
+      addMessage("ai", "🎨 Updating your design based on your feedback...");
+      await generateImage(msg);
+      return;
+    }
+
+    // Otherwise use edge function for chat
     setIsTyping(true);
     try {
       const roomContext = includeEvaluation ? analysisResult : null;
@@ -275,6 +292,31 @@ const Design2DTab = () => {
     a.href = generatedImageUrl;
     a.download = `redesign-${Date.now()}.png`;
     a.click();
+  };
+
+  const handleSave = async () => {
+    if (!generatedImageUrl) return;
+    setIsSaving(true);
+    try {
+      const themeLabel = selectedThemes.map((id) => THEMES.find((t) => t.id === id)?.label).join(" + ") || "Custom";
+      await saveDesign({
+        type: "2d",
+        name: `${themeLabel} ${roomType}`,
+        thumbnail_url: generatedImageUrl,
+        data: {
+          roomType,
+          themes: selectedThemes,
+          generatedImageUrl,
+          originalImagePreview: imagePreview,
+          analysisResult: includeEvaluation ? analysisResult : null,
+        },
+      });
+      toast({ title: "Design saved!", description: "You can find it in your dashboard." });
+    } catch (err: any) {
+      toast({ title: "Save failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -379,44 +421,10 @@ const Design2DTab = () => {
 
       {/* ── Right Panel ── */}
       <div className="flex flex-col gap-4">
-        {/* Image Display */}
-        <Card className="glass-card-static flex flex-col items-center justify-center min-h-[320px]">
-          <CardContent className="flex flex-col items-center gap-4 p-6 w-full">
-            {generatedImageUrl ? (
-              <>
-                <img src={generatedImageUrl} alt="Redesigned room" className="w-full max-h-[420px] rounded-xl object-contain" />
-                {generatedLabel && <p className="text-sm font-medium text-muted-foreground">{generatedLabel}</p>}
-                <div className="flex gap-3">
-                  <Button onClick={handleGenerate} disabled={isGenerating} className="btn-premium gap-2">
-                    <Wand2 className="h-4 w-4" /> Redesign new room
-                  </Button>
-                  <Button variant="outline" onClick={handleDownload} className="gap-2 border-border/50 hover:border-primary/30">
-                    <Download className="h-4 w-4" /> Download photo
-                  </Button>
-                </div>
-              </>
-            ) : imagePreview ? (
-              <>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Original Room</Label>
-                <img src={imagePreview} alt="Original room" className="w-full max-h-[320px] rounded-xl object-contain" />
-                <p className="text-sm text-muted-foreground text-center">Select themes and click <strong>"Redesign room"</strong></p>
-              </>
-            ) : (
-              <div className="flex flex-col items-center gap-3 py-12 text-center">
-                <Upload className="h-12 w-12 text-muted-foreground/40" />
-                <p className="text-lg font-display font-semibold text-foreground">
-                  Redesign your <span className="text-primary">room</span> in seconds
-                </p>
-                <p className="text-sm text-muted-foreground max-w-sm">Upload a room, specify the type, and select themes to redesign.</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Chatbot */}
-        <Card className="glass-card-static flex flex-col" style={{ height: "320px" }}>
+        {/* Style Assistant (moved up) */}
+        <Card className="glass-card-static flex flex-col" style={{ height: "280px" }}>
           <div className="px-4 py-2.5 border-b border-border/30">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">💬 Style Assistant</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">💬 Style Assistant — describe changes to regenerate</p>
           </div>
           <ScrollArea ref={scrollRef} className="flex-1 p-3">
             <div className="space-y-3">
@@ -458,15 +466,67 @@ const Design2DTab = () => {
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChatSubmit()}
-              placeholder="Ask for style suggestions..."
+              placeholder="e.g. 'Make it warmer' or 'Add wooden shelves'..."
               disabled={isGenerating || isAnalyzing}
               className="flex-1 bg-muted/30 border-border/50 focus:border-primary/50 h-8 text-xs"
             />
-            <Button size="icon" onClick={handleChatSubmit} disabled={!inputMessage.trim() || isTyping} className="btn-premium h-8 w-8">
-              {isTyping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            <Button size="icon" onClick={handleChatSubmit} disabled={!inputMessage.trim() || isTyping || isGenerating} className="btn-premium h-8 w-8">
+              {isTyping || isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
             </Button>
           </div>
         </Card>
+
+        {/* Image Display */}
+        <Card className="glass-card-static flex flex-col items-center justify-center min-h-[320px]">
+          <CardContent className="flex flex-col items-center gap-4 p-6 w-full">
+            {generatedImageUrl ? (
+              <>
+                <img src={generatedImageUrl} alt="Redesigned room" className="w-full max-h-[420px] rounded-xl object-contain" />
+                {generatedLabel && <p className="text-sm font-medium text-muted-foreground">{generatedLabel}</p>}
+              </>
+            ) : imagePreview ? (
+              <>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Original Room</Label>
+                <img src={imagePreview} alt="Original room" className="w-full max-h-[320px] rounded-xl object-contain" />
+                <p className="text-sm text-muted-foreground text-center">Select themes and click <strong>"Redesign room"</strong>, or chat with the assistant above</p>
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-12 text-center">
+                <Upload className="h-12 w-12 text-muted-foreground/40" />
+                <p className="text-lg font-display font-semibold text-foreground">
+                  Redesign your <span className="text-primary">room</span> in seconds
+                </p>
+                <p className="text-sm text-muted-foreground max-w-sm">Upload a room, specify the type, and select themes to redesign.</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Save & Download bar */}
+        {generatedImageUrl && (
+          <div className="flex items-center justify-end gap-3">
+            <Button
+              variant="outline"
+              onClick={handleGenerate}
+              disabled={isGenerating}
+              className="gap-2 border-border/50 hover:border-primary/30"
+            >
+              <Wand2 className="h-4 w-4" /> Redesign again
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="gap-2 border-border/50 hover:border-primary/30"
+            >
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save design
+            </Button>
+            <Button onClick={handleDownload} className="btn-premium gap-2">
+              <Download className="h-4 w-4" /> Download photo
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
