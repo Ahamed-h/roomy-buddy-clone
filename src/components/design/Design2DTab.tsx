@@ -12,6 +12,7 @@ import { getHfSpacesUrl } from "@/services/api";
 import { isOllamaAvailable, ollamaChatStream } from "@/services/ollama";
 import { supabase } from "@/integrations/supabase/client";
 import { saveDesign } from "@/lib/designs";
+import { directChat, directVision, directGenerateImage, hasDirectKeys } from "@/services/directAI";
 import { cn } from "@/lib/utils";
 
 const ROOM_TYPES = ["Bedroom", "Living Room", "Kitchen", "Bathroom", "Dining Room", "Office", "Kids Room"];
@@ -129,6 +130,20 @@ const Design2DTab = () => {
           }
         }
 
+        // Try direct API
+        if (hasDirectKeys()) {
+          try {
+            const verifyPrompt = `You are an interior design AI verifier. Cross-check these ML results against the photo. Return corrected JSON with: aesthetic_score, lighting.brightness, objects, style_match_scores, possible_styles, recommendations.\n\nML Results:\n${JSON.stringify(data, null, 2)}`;
+            const raw = await directVision(verifyPrompt, b64);
+            const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+            const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw.trim();
+            const verified = JSON.parse(jsonStr);
+            if (verified) { setAnalysisResult(verified); return; }
+          } catch (err) {
+            console.warn("Direct API verify failed, trying Supabase:", err);
+          }
+        }
+
         // Fallback to edge function
         const { data: verified, error } = await supabase.functions.invoke("verify-analysis", {
           body: { analysisResult: data, imageBase64: b64 },
@@ -211,9 +226,25 @@ const Design2DTab = () => {
         }
       } catch {}
 
-      // Fallback cloud
-      setPipelineStep("Generating (cloud)...");
+      // Try direct API
+      setPipelineStep("Generating (direct API)...");
       const b64 = imageBase64 || await fileToBase64(currentImage);
+
+      if (hasDirectKeys()) {
+        try {
+          const result = await directGenerateImage(prompt, b64);
+          if (result?.image_url) {
+            setGeneratedImageUrl(result.image_url);
+            addMessage("ai", "Here's your **AI-generated** redesign! 👇 Want any changes?", result.image_url);
+            return;
+          }
+        } catch (err) {
+          console.warn("Direct API image gen failed, trying Supabase:", err);
+        }
+      }
+
+      // Fallback to Supabase edge function
+      setPipelineStep("Generating (cloud)...");
       const { data, error } = await supabase.functions.invoke("generate-image", {
         body: { prompt, imageBase64: b64 },
       });
@@ -296,6 +327,20 @@ const Design2DTab = () => {
           }
         } catch (err) {
           console.warn("Ollama chat failed, falling back to cloud:", err);
+        }
+      }
+
+      // Try direct API
+      if (hasDirectKeys()) {
+        try {
+          const systemPrompt = "You are an expert interior designer assistant. Help users with room design, furniture selection, color palettes, and style advice. Be specific and actionable.";
+          const directResponse = await directChat(chatMessages, systemPrompt);
+          if (directResponse) {
+            addMessage("ai", directResponse);
+            return;
+          }
+        } catch (err) {
+          console.warn("Direct API chat failed, trying Supabase:", err);
         }
       }
 
