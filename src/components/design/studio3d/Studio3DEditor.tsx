@@ -22,6 +22,7 @@ import { MOCK_WALLS, MOCK_FURNITURE_ITEMS, getSampleData, FURNITURE_LIBRARY } fr
 import type { Wall, Furniture } from "./types";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { isOllamaAvailable, ollamaVision } from "@/services/ollama";
 
 const Studio3DEditor = () => {
   const { toast } = useToast();
@@ -61,11 +62,52 @@ const Studio3DEditor = () => {
       try {
         const imageBase64 = await fileToBase64(file);
         setUploadedImageUrl(imageBase64);
-        const { data, error } = await supabase.functions.invoke("analyze-floorplan", {
-          body: { imageBase64 },
-        });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
+
+        let data: any = null;
+
+        // Try Ollama (local Qwen2.5-VL) first
+        const ollamaOnline = await isOllamaAvailable();
+        if (ollamaOnline) {
+          try {
+            toast({ title: "Analyzing with local AI (Qwen2.5-VL)..." });
+            const prompt = `Analyze this floor plan image. Extract all walls, doors, windows, furniture, and rooms with precise coordinates. Return ONLY valid JSON with this schema: { "unit": "feet"|"meters", "dimensions": {"width": number, "height": number}, "walls": [{"start":{"x":number,"y":number},"end":{"x":number,"y":number},"thickness":number}], "doors": [{"position":{"x":number,"y":number},"width":number,"rotation":number,"type":"single"|"double"|"sliding"}], "windows": [{"start":{"x":number,"y":number},"end":{"x":number,"y":number},"width":number}], "furniture": [{"type":"string","label":"string","position":{"x":number,"y":number},"rotation":number,"width":number,"depth":number,"height":number}], "rooms": [{"name":"string","center":{"x":number,"y":number}}] }`;
+            const raw = await ollamaVision(prompt, imageBase64);
+            let jsonStr = raw;
+            const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (jsonMatch) jsonStr = jsonMatch[1].trim();
+            if (!jsonStr.startsWith("{")) {
+              const braceMatch = jsonStr.match(/\{[\s\S]*\}/);
+              if (braceMatch) jsonStr = braceMatch[0];
+            }
+            const parsed = JSON.parse(jsonStr);
+            // Convert to meters
+            const unit = parsed.unit || "meters";
+            const toM = unit === "feet" ? 0.3048 : 1;
+            data = {
+              walls: (parsed.walls || []).map((w: any, i: number) => ({ id: `w-ai-${i}`, start: { x: (w.start?.x||0)*toM, y: (w.start?.y||0)*toM }, end: { x: (w.end?.x||0)*toM, y: (w.end?.y||0)*toM }, thickness: (w.thickness||(unit==="feet"?0.5:0.15))*toM })),
+              furniture: [
+                ...(parsed.furniture||[]).map((f:any,i:number)=>({id:`f-ai-${i}`,type:f.type||"table",label:f.label||f.type||"Item",position:{x:(f.position?.x||0)*toM,y:(f.position?.y||0)*toM},rotation:f.rotation||0,width:(f.width||1)*toM,depth:(f.depth||1)*toM,height:(f.height||1)*toM})),
+                ...(parsed.doors||[]).map((d:any,i:number)=>({id:`d-ai-${i}`,type:"door",label:`Door (${d.type||"single"})`,position:{x:(d.position?.x||0)*toM,y:(d.position?.y||0)*toM},rotation:d.rotation||0,width:(d.width||(unit==="feet"?3:0.9))*toM,depth:0.1,height:2.1})),
+                ...(parsed.windows||[]).map((w:any,i:number)=>{const sx=(w.start?.x||0)*toM,sy=(w.start?.y||0)*toM,ex=(w.end?.x||0)*toM,ey=(w.end?.y||0)*toM;return{id:`win-ai-${i}`,type:"window",label:"Window",position:{x:(sx+ex)/2,y:(sy+ey)/2},rotation:0,width:w.width?w.width*toM:Math.sqrt((ex-sx)**2+(ey-sy)**2),depth:0.15,height:1.2}}),
+              ],
+              rooms: (parsed.rooms||[]).map((r:any,i:number)=>({id:`r-ai-${i}`,name:r.name,center:{x:(r.center?.x||0)*toM,y:(r.center?.y||0)*toM}})),
+              dimensions: { width: (parsed.dimensions?.width||10)*toM, height: (parsed.dimensions?.height||10)*toM },
+            };
+          } catch (err) {
+            console.warn("Ollama floorplan analysis failed, falling back to cloud:", err);
+          }
+        }
+
+        // Fallback to edge function
+        if (!data) {
+          const { data: edgeData, error } = await supabase.functions.invoke("analyze-floorplan", {
+            body: { imageBase64 },
+          });
+          if (error) throw error;
+          if (edgeData?.error) throw new Error(edgeData.error);
+          data = edgeData;
+        }
+
         setWalls(data.walls || []);
         setFurniture(data.furniture || []);
         if (data.dimensions) setSceneDimensions(data.dimensions);

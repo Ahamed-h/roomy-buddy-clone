@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Wand2, Download, Loader2, CheckCircle2, Send, Bot, User, Save } from "lucide-react";
 import { getHfSpacesUrl } from "@/services/api";
+import { isOllamaAvailable, ollamaChatStream } from "@/services/ollama";
 import { supabase } from "@/integrations/supabase/client";
 import { saveDesign } from "@/lib/designs";
 import { cn } from "@/lib/utils";
@@ -111,6 +112,24 @@ const Design2DTab = () => {
       setPipelineStep("AI verifying results...");
       try {
         const b64 = await fileToBase64(file);
+        
+        // Try Ollama first for verification
+        const ollamaOnline = await isOllamaAvailable();
+        if (ollamaOnline) {
+          try {
+            const { ollamaVision } = await import("@/services/ollama");
+            const prompt = `You are an interior design AI verifier. Cross-check these ML results against the photo. Return corrected JSON with: aesthetic_score, lighting.brightness, objects, style_match_scores, possible_styles, recommendations.\n\nML Results:\n${JSON.stringify(data, null, 2)}`;
+            const raw = await ollamaVision(prompt, b64);
+            const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+            const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw.trim();
+            const verified = JSON.parse(jsonStr);
+            if (verified) { setAnalysisResult(verified); return; }
+          } catch (err) {
+            console.warn("Ollama verify failed, trying cloud:", err);
+          }
+        }
+
+        // Fallback to edge function
         const { data: verified, error } = await supabase.functions.invoke("verify-analysis", {
           body: { analysisResult: data, imageBase64: b64 },
         });
@@ -239,18 +258,51 @@ const Design2DTab = () => {
       return;
     }
 
-    // Otherwise use edge function for chat
+    // Otherwise use Ollama (local) first, then edge function for chat
     setIsTyping(true);
     try {
+      const chatMessages = [
+        ...chatHistory.filter((m) => m.content).map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content })),
+        { role: "user", content: msg },
+      ];
+
+      // Try Ollama first
+      const ollamaOnline = await isOllamaAvailable();
+      if (ollamaOnline) {
+        try {
+          const stream = await ollamaChatStream(chatMessages);
+          if (stream) {
+            const reader = stream.getReader();
+            const decoder = new TextDecoder();
+            let aiResponse = "";
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const chunk = decoder.decode(value);
+              for (const line of chunk.split("\n")) {
+                if (line.startsWith("data: ") && line !== "data: [DONE]") {
+                  try {
+                    const json = JSON.parse(line.slice(6));
+                    const delta = json.choices?.[0]?.delta?.content;
+                    if (delta) aiResponse += delta;
+                  } catch {}
+                }
+              }
+            }
+            if (aiResponse) {
+              addMessage("ai", aiResponse);
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn("Ollama chat failed, falling back to cloud:", err);
+        }
+      }
+
+      // Fallback to edge function
       const roomContext = includeEvaluation ? analysisResult : null;
       const { data: streamData, error } = await supabase.functions.invoke("design-chat", {
-        body: {
-          messages: [
-            ...chatHistory.filter((m) => m.content).map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content })),
-            { role: "user", content: msg },
-          ],
-          roomContext,
-        },
+        body: { messages: chatMessages, roomContext },
       });
       if (error) throw error;
 
