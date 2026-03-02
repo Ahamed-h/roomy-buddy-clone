@@ -1,12 +1,15 @@
 // Direct AI API calls (bypasses Supabase edge functions)
 // Used when Supabase is inaccessible (e.g. regional blocks)
 
+const DEFAULT_GEMINI_KEY = "AIzaSyBffDH__I65-5qglLFCsaq970DVLdu0Tfs";
+const DEFAULT_OPENAI_KEY = "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";
+
 function getGeminiKey(): string | null {
-  return localStorage.getItem("aivo_gemini_key");
+  return localStorage.getItem("aivo_gemini_key") || DEFAULT_GEMINI_KEY;
 }
 
 function getOpenAIKey(): string | null {
-  return localStorage.getItem("aivo_openai_key");
+  return localStorage.getItem("aivo_openai_key") || DEFAULT_OPENAI_KEY;
 }
 
 export function setGeminiKey(key: string) {
