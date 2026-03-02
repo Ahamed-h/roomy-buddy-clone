@@ -103,6 +103,40 @@ async def analyze(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
+# ── ComfyUI Bridge ──
+try:
+    from comfyui_bridge import generate_with_comfyui, is_comfyui_available
+    logger.info("✅ ComfyUI bridge imported")
+except Exception as e:
+    logger.warning(f"⚠️ ComfyUI bridge not available: {e}")
+    generate_with_comfyui = None
+    is_comfyui_available = lambda: False
+
+
+@app.get("/comfyui/status")
+async def comfyui_status():
+    """Check if ComfyUI is running."""
+    available = is_comfyui_available()
+    return {"available": available, "url": "http://127.0.0.1:8188"}
+
+
+@app.post("/design/generate/2d/comfyui")
+async def generate_comfyui(file: UploadFile = File(...), style_prompt: str = "modern minimalist interior"):
+    """Generate a room redesign using local ComfyUI pipeline."""
+    if not generate_with_comfyui or not is_comfyui_available():
+        raise HTTPException(status_code=503, detail="ComfyUI is not running. Start it with: python main.py --cpu")
+
+    try:
+        contents = await file.read()
+        result = generate_with_comfyui(contents, style_prompt)
+        return JSONResponse(content=result)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="ComfyUI generation timed out (>120s)")
+    except Exception as e:
+        logger.error(f"ComfyUI generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"ComfyUI generation failed: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=7860)

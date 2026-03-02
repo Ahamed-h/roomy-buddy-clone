@@ -209,8 +209,27 @@ const Design2DTab = () => {
     try {
       const prompt = await buildSmartPrompt(extraNotes);
 
-      // Try local first
-      setPipelineStep("Generating (local)...");
+      // Try ComfyUI first (fully local, unlimited)
+      setPipelineStep("Generating (ComfyUI local)...");
+      try {
+        const fd = new FormData();
+        fd.append("file", currentImage);
+        fd.append("style_prompt", prompt);
+        const resp = await fetch(`${API}/design/generate/2d/comfyui`, { method: "POST", body: fd });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.image_url) {
+            setGeneratedImageUrl(data.image_url);
+            addMessage("ai", "Here's your redesign via **ComfyUI** (local)! 👇 Tell me if you'd like any changes.", data.image_url);
+            return;
+          }
+        }
+      } catch {
+        console.log("ComfyUI unavailable, trying repaint endpoint...");
+      }
+
+      // Try local repaint fallback
+      setPipelineStep("Generating (local repaint)...");
       try {
         const fd = new FormData();
         fd.append("file", currentImage);
