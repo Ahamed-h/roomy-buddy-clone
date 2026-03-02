@@ -86,6 +86,51 @@ serve(async (req) => {
       }
     }
 
+    // Try Lovable AI Gateway with Gemini image model
+    const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+    if (lovableKey) {
+      try {
+        console.log("Trying Lovable AI Gateway for image generation...");
+        const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "google/gemini-2.5-flash-image",
+            messages: [{
+              role: "user",
+              content: [
+                { type: "text", text: `Generate a photorealistic interior design image: ${prompt}. Transform the style, furniture, colors, and materials while keeping the same room layout.` },
+                ...(imageBase64 ? [{ type: "image_url", image_url: { url: imageBase64 } }] : []),
+              ],
+            }],
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const content = data.choices?.[0]?.message?.content || "";
+          // Check for inline base64 image in response
+          const imgMatch = content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+          if (imgMatch) {
+            return new Response(JSON.stringify({ image_url: imgMatch[0], description: "Generated with Lovable AI" }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          // Return text description as fallback
+          if (content) {
+            return new Response(JSON.stringify({ description: content }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+        } else {
+          const errText = await response.text();
+          console.error("Lovable AI image gen failed:", response.status, errText);
+        }
+      } catch (err) {
+        console.error("Lovable AI error:", err);
+      }
+    }
+
     return new Response(JSON.stringify({ error: "All image generation providers failed" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
