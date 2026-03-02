@@ -34,6 +34,8 @@ const Studio3DEditor = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+  const [sceneDimensions, setSceneDimensions] = useState<{ width: number; height: number } | null>(null);
 
   const loadSample = () => {
     const data = getSampleData();
@@ -58,6 +60,7 @@ const Studio3DEditor = () => {
       setIsProcessing(true);
       try {
         const imageBase64 = await fileToBase64(file);
+        setUploadedImageUrl(imageBase64);
         const { data, error } = await supabase.functions.invoke("analyze-floorplan", {
           body: { imageBase64 },
         });
@@ -65,11 +68,11 @@ const Studio3DEditor = () => {
         if (data?.error) throw new Error(data.error);
         setWalls(data.walls || []);
         setFurniture(data.furniture || []);
+        if (data.dimensions) setSceneDimensions(data.dimensions);
         setSelectedId(null);
         toast({ title: "AI Analysis Complete", description: `Detected ${data.walls?.length || 0} walls and ${data.furniture?.length || 0} furniture items.` });
       } catch (err: any) {
         console.error("Floorplan analysis failed:", err);
-        // Fallback to sample data
         const sample = getSampleData();
         setWalls(sample.walls);
         setFurniture(sample.furniture);
@@ -347,6 +350,8 @@ const Studio3DEditor = () => {
                   onUpdateFurniture={setFurniture}
                   onSelectItem={setSelectedId}
                   selectedId={selectedId}
+                  backgroundImage={uploadedImageUrl}
+                  sceneDimensions={sceneDimensions}
                 />
               </motion.div>
             ) : (
