@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -13,9 +13,10 @@ import {
   ChevronLeft,
   ScanEye,
   RotateCcw,
+  Download,
 } from "lucide-react";
 import FloorplanEditor from "./FloorplanEditor";
-import SceneViewer3D from "./SceneViewer3D";
+import SceneViewer3D, { type SceneViewer3DHandle } from "./SceneViewer3D";
 import MidasReconstruction from "./MidasReconstruction";
 import { MOCK_WALLS, MOCK_FURNITURE_ITEMS, getSampleData, FURNITURE_LIBRARY } from "./mockData";
 import type { Wall, Furniture } from "./types";
@@ -24,6 +25,8 @@ import { supabase } from "@/integrations/supabase/client";
 
 const Studio3DEditor = () => {
   const { toast } = useToast();
+  const sceneRef = useRef<SceneViewer3DHandle>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const [view, setView] = useState<"2d" | "3d">("2d");
   const [walls, setWalls] = useState<Wall[]>(MOCK_WALLS);
@@ -354,7 +357,7 @@ const Studio3DEditor = () => {
                 exit={{ opacity: 0 }}
                 className="w-full h-full"
               >
-                <SceneViewer3D walls={walls} furniture={furniture} />
+                <SceneViewer3D ref={sceneRef} walls={walls} furniture={furniture} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -362,6 +365,34 @@ const Studio3DEditor = () => {
 
         {/* Floating Controls */}
         <div className="absolute bottom-6 right-6 flex flex-col space-y-2 z-40">
+          {view === "3d" && (
+            <button
+              onClick={async () => {
+                if (!sceneRef.current) return;
+                setIsExporting(true);
+                try {
+                  const blob = await sceneRef.current.exportGLB();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "archai-scene.glb";
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  toast({ title: "Exported", description: "GLB file downloaded successfully." });
+                } catch (err: any) {
+                  console.error("GLB export failed:", err);
+                  toast({ title: "Export Failed", description: err?.message || "Unknown error", variant: "destructive" });
+                } finally {
+                  setIsExporting(false);
+                }
+              }}
+              disabled={isExporting}
+              className="p-3 bg-[#0d1225] border border-white/10 rounded-xl shadow-xl text-white/40 hover:text-[#4a90e2] transition-all hover:scale-105 disabled:opacity-50"
+              title="Export as GLB"
+            >
+              {isExporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+            </button>
+          )}
           <button
             onClick={handleReset}
             className="p-3 bg-[#0d1225] border border-white/10 rounded-xl shadow-xl text-white/40 hover:text-red-400 transition-all hover:scale-105"
