@@ -6,6 +6,30 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+interface AIProvider {
+  url: string;
+  key: string;
+  model: string;
+  name: string;
+}
+
+function getProviders(): AIProvider[] {
+  const providers: AIProvider[] = [];
+  const geminiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
+  if (geminiKey) {
+    providers.push({ url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: geminiKey, model: "gemini-2.5-flash", name: "Gemini" });
+  }
+  const openaiKey = Deno.env.get("OPENAI_API_KEY");
+  if (openaiKey) {
+    providers.push({ url: "https://api.openai.com/v1/chat/completions", key: openaiKey, model: "gpt-4o-mini", name: "OpenAI" });
+  }
+  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  if (lovableKey) {
+    providers.push({ url: "https://ai.gateway.lovable.dev/v1/chat/completions", key: lovableKey, model: "google/gemini-3-flash-preview", name: "Lovable" });
+  }
+  return providers;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -13,10 +37,9 @@ serve(async (req) => {
 
   try {
     const { messages, roomContext } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const providers = getProviders();
+    if (providers.length === 0) throw new Error("No AI API keys configured");
 
-    // Build system prompt with room context
     let systemPrompt = `You are RoomBot, an expert AI interior design assistant inside the aivo Design Studio. You help users design and furnish their rooms.
 
 Your capabilities:
@@ -24,68 +47,54 @@ Your capabilities:
 - Recommend color schemes, materials, and styles
 - Help with lighting decisions
 - Suggest furniture pieces that match the room's style
-- Answer questions about interior design principles
 
-When a user asks to add furniture, respond naturally and include a JSON block that the frontend will parse to add furniture. Format:
+When a user asks to add furniture, respond naturally and include a JSON block:
 \`\`\`furniture
 {"name": "Item Name", "width": 120, "height": 80, "depth": 60, "color": "#hexcolor", "material": "wood|fabric|metal|glass"}
 \`\`\`
 
-Keep responses concise, friendly, and actionable. Use emoji sparingly.`;
+Keep responses concise, friendly, and actionable.`;
 
     if (roomContext) {
-      systemPrompt += `\n\nCurrent room context from AI evaluation:
+      systemPrompt += `\n\nCurrent room context:
 - Aesthetic score: ${roomContext.aesthetic_score || "N/A"}/10
 - Brightness: ${roomContext.brightness || "N/A"}%
-- Objects detected: ${roomContext.objects?.map((o: any) => o.label).join(", ") || "none"}
-- Top styles: ${roomContext.top_styles?.map((s: any) => `${s.style} (${Math.round(s.score * 100)}%)`).join(", ") || "unknown"}
-- Recommendations: ${roomContext.recommendations?.join("; ") || "none"}
-
-Use this context to give personalized advice.`;
+- Objects: ${roomContext.objects?.map((o: any) => o.label).join(", ") || "none"}
+- Styles: ${roomContext.top_styles?.map((s: any) => `${s.style} (${Math.round(s.score * 100)}%)`).join(", ") || "unknown"}
+- Recommendations: ${roomContext.recommendations?.join("; ") || "none"}`;
     }
 
-    const response = await fetch(
-      "https://ai.gateway.lovable.dev/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages,
-          ],
-          stream: true,
-        }),
-      }
-    );
+    const allMessages = [{ role: "system", content: systemPrompt }, ...messages];
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+    // Try providers with streaming
+    for (const provider of providers) {
+      try {
+        console.log(`Trying ${provider.name} for chat...`);
+        const response = await fetch(provider.url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${provider.key}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ model: provider.model, messages: allMessages, stream: true }),
+        });
+
+        if (response.ok) {
+          console.log(`${provider.name} streaming started`);
+          return new Response(response.body, {
+            headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+          });
+        }
+        console.error(`${provider.name} failed: ${response.status}`);
+        continue;
+      } catch (err) {
+        console.error(`${provider.name} error:`, err);
+        continue;
       }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI credits exhausted. Please add credits in Lovable settings." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
-      return new Response(
-        JSON.stringify({ error: "AI service error" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
     }
 
-    return new Response(response.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+    return new Response(JSON.stringify({ error: "All AI providers failed" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("design-chat error:", e);
