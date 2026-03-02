@@ -1,5 +1,5 @@
-import { Suspense } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Suspense, useRef, forwardRef, useImperativeHandle } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid, Environment, PerspectiveCamera, ContactShadows } from "@react-three/drei";
 import type { Wall, Furniture } from "./types";
 
@@ -154,12 +154,80 @@ const WallModel = ({ wall }: { wall: Wall }) => {
   );
 };
 
+/** Inner component to capture the Three.js scene ref */
+const SceneContent = forwardRef<THREE.Scene, { walls: Wall[]; furniture: Furniture[]; centerX: number; centerY: number; floorWidth: number; floorHeight: number }>(
+  ({ walls, furniture, centerX, centerY, floorWidth, floorHeight }, ref) => {
+    const { scene } = useThree();
+    useImperativeHandle(ref, () => scene, [scene]);
+
+    return (
+      <>
+        <PerspectiveCamera makeDefault position={[centerX + 5, 10, centerY + 5]} />
+        <OrbitControls
+          makeDefault
+          target={[centerX, 0, centerY]}
+          minPolarAngle={0}
+          maxPolarAngle={Math.PI / 2.1}
+        />
+
+        <color attach="background" args={["#0a0f2a"]} />
+        <ambientLight intensity={0.7} />
+        <directionalLight
+          position={[10, 20, 10]}
+          intensity={1.5}
+          castShadow
+          shadow-mapSize={2048}
+        />
+        <pointLight position={[-10, 10, -10]} intensity={0.5} />
+        <Environment preset="night" />
+
+        <group>
+          {walls.map((wall) => (
+            <WallModel key={wall.id} wall={wall} />
+          ))}
+          {furniture.map((item) => (
+            <FurnitureModel key={item.id} item={item} />
+          ))}
+        </group>
+
+        {/* Floor */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[centerX, -0.01, centerY]} receiveShadow>
+          <planeGeometry args={[floorWidth, floorHeight]} />
+          <meshStandardMaterial color="#27272a" />
+        </mesh>
+
+        <Grid
+          args={[40, 40]}
+          position={[0, -0.02, 0]}
+          cellSize={0.5}
+          cellColor="#1a2040"
+          sectionSize={1}
+          sectionColor="#2a3060"
+          fadeDistance={30}
+          fadeStrength={1}
+        />
+        <ContactShadows position={[0, 0, 0]} opacity={0.4} scale={40} blur={2} far={4.5} />
+      </>
+    );
+  }
+);
+
+SceneContent.displayName = "SceneContent";
+
 interface Props {
   walls: Wall[];
   furniture: Furniture[];
 }
 
-const SceneViewer3D = ({ walls, furniture }: Props) => {
+export interface SceneViewer3DHandle {
+  exportGLB: () => Promise<Blob>;
+}
+
+import * as THREE from "three";
+
+const SceneViewer3D = forwardRef<SceneViewer3DHandle, Props>(({ walls, furniture }, ref) => {
+  const sceneRef = useRef<THREE.Scene>(null);
+
   const allPoints = walls.flatMap((w) => [w.start, w.end]);
   const minX = Math.min(...allPoints.map((p) => p.x), 0) - 2;
   const maxX = Math.max(...allPoints.map((p) => p.x), 10) + 2;
@@ -171,59 +239,46 @@ const SceneViewer3D = ({ walls, furniture }: Props) => {
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2;
 
+  useImperativeHandle(ref, () => ({
+    exportGLB: async () => {
+      const { GLTFExporter } = await import("three/examples/jsm/exporters/GLTFExporter.js");
+      const exporter = new GLTFExporter();
+      const scene = sceneRef.current;
+      if (!scene) throw new Error("Scene not ready");
+
+      return new Promise<Blob>((resolve, reject) => {
+        exporter.parse(
+          scene,
+          (result) => {
+            const blob = new Blob([result as ArrayBuffer], { type: "model/gltf-binary" });
+            resolve(blob);
+          },
+          (error) => reject(error),
+          { binary: true }
+        );
+      });
+    },
+  }));
+
   return (
     <div className="h-full w-full rounded-lg overflow-hidden" style={{ minHeight: 400 }}>
       <Canvas shadows gl={{ antialias: true }}>
         <Suspense fallback={null}>
-          <PerspectiveCamera makeDefault position={[centerX + 5, 10, centerY + 5]} />
-          <OrbitControls
-            makeDefault
-            target={[centerX, 0, centerY]}
-            minPolarAngle={0}
-            maxPolarAngle={Math.PI / 2.1}
+          <SceneContent
+            ref={sceneRef}
+            walls={walls}
+            furniture={furniture}
+            centerX={centerX}
+            centerY={centerY}
+            floorWidth={floorWidth}
+            floorHeight={floorHeight}
           />
-
-          <color attach="background" args={["#0a0f2a"]} />
-          <ambientLight intensity={0.7} />
-          <directionalLight
-            position={[10, 20, 10]}
-            intensity={1.5}
-            castShadow
-            shadow-mapSize={2048}
-          />
-          <pointLight position={[-10, 10, -10]} intensity={0.5} />
-          <Environment preset="night" />
-
-          <group>
-            {walls.map((wall) => (
-              <WallModel key={wall.id} wall={wall} />
-            ))}
-            {furniture.map((item) => (
-              <FurnitureModel key={item.id} item={item} />
-            ))}
-          </group>
-
-          {/* Floor */}
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[centerX, -0.01, centerY]} receiveShadow>
-            <planeGeometry args={[floorWidth, floorHeight]} />
-            <meshStandardMaterial color="#27272a" />
-          </mesh>
-
-          <Grid
-            args={[40, 40]}
-            position={[0, -0.02, 0]}
-            cellSize={0.5}
-            cellColor="#1a2040"
-            sectionSize={1}
-            sectionColor="#2a3060"
-            fadeDistance={30}
-            fadeStrength={1}
-          />
-          <ContactShadows position={[0, 0, 0]} opacity={0.4} scale={40} blur={2} far={4.5} />
         </Suspense>
       </Canvas>
     </div>
   );
-};
+});
+
+SceneViewer3D.displayName = "SceneViewer3D";
 
 export default SceneViewer3D;
