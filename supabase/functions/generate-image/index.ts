@@ -14,80 +14,66 @@ serve(async (req) => {
   try {
     const { prompt, imageBase64 } = await req.json();
 
-    // For image generation, try Gemini first (image gen model), then OpenAI (DALL-E), then Lovable
-    const geminiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
-    const openaiKey = Deno.env.get("OPENAI_API_KEY");
-    
-
-    // Try Gemini image generation
-    if (geminiKey) {
-      try {
-        console.log("Trying Gemini for image generation...");
-        const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${geminiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "gemini-2.0-flash-exp-image-generation",
-            messages: [{
-              role: "user",
-              content: [
-                { type: "text", text: `Redesign this room with the following style: ${prompt}. Keep the same room layout but transform the style, furniture, colors, and materials. Make it photorealistic.` },
-                ...(imageBase64 ? [{ type: "image_url", image_url: { url: imageBase64 } }] : []),
-              ],
-            }],
-            modalities: ["image", "text"],
-          }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-          const textContent = data.choices?.[0]?.message?.content || "";
-          if (imageUrl) {
-            return new Response(JSON.stringify({ image_url: imageUrl, description: textContent }), {
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
-          }
-        }
-        console.error("Gemini image gen failed:", response.status);
-      } catch (err) {
-        console.error("Gemini error:", err);
-      }
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) {
+      return new Response(JSON.stringify({ error: "LOVABLE_API_KEY is not configured" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Try OpenAI DALL-E
-    if (openaiKey) {
-      try {
-        console.log("Trying OpenAI DALL-E...");
-        const response = await fetch("https://api.openai.com/v1/images/generations", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "dall-e-3",
-            prompt: `Interior design: ${prompt}. Photorealistic room redesign.`,
-            n: 1,
-            size: "1024x1024",
-            response_format: "b64_json",
-          }),
-        });
+    const messages = [{
+      role: "user",
+      content: [
+        { type: "text", text: `Redesign this room with the following style: ${prompt}. Keep the same room layout but transform the style, furniture, colors, and materials. Make it photorealistic.` },
+        ...(imageBase64 ? [{ type: "image_url", image_url: { url: imageBase64 } }] : []),
+      ],
+    }];
 
-        if (response.ok) {
-          const data = await response.json();
-          const b64 = data.data?.[0]?.b64_json;
-          if (b64) {
-            return new Response(JSON.stringify({ image_url: `data:image/png;base64,${b64}`, description: "Generated with DALL-E 3" }), {
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
-          }
-        }
-        console.error("OpenAI DALL-E failed:", response.status);
-      } catch (err) {
-        console.error("OpenAI error:", err);
-      }
+    console.log("Generating image via Lovable AI Gateway...");
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash-image",
+        messages,
+        modalities: ["image", "text"],
+      }),
+    });
+
+    if (response.status === 429) {
+      return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
+        status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (response.status === 402) {
+      return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits in your Lovable workspace settings." }), {
+        status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    return new Response(JSON.stringify({ error: "All image generation providers failed. Ensure GOOGLE_GEMINI_API_KEY or OPENAI_API_KEY is set." }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("Lovable AI Gateway error:", response.status, errText);
+      return new Response(JSON.stringify({ error: `Image generation failed (${response.status})` }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const data = await response.json();
+    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    const textContent = data.choices?.[0]?.message?.content || "Room redesigned";
+
+    if (!imageUrl) {
+      return new Response(JSON.stringify({ error: "No image was generated. Try a different prompt." }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({ image_url: imageUrl, description: textContent }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("generate-image error:", e);
