@@ -6,7 +6,9 @@ Wraps your master_engine.py for deployment on HF Spaces with free T4 GPU.
 import os
 import io
 import json
+import base64
 import logging
+import requests
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
