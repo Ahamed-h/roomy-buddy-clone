@@ -23,10 +23,6 @@ function getProviders(): AIProvider[] {
   if (openaiKey) {
     providers.push({ url: "https://api.openai.com/v1/chat/completions", key: openaiKey, model: "gpt-4o", name: "OpenAI" });
   }
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
-  if (lovableKey) {
-    providers.push({ url: "https://ai.gateway.lovable.dev/v1/chat/completions", key: lovableKey, model: "google/gemini-2.5-flash", name: "Lovable" });
-  }
   return providers;
 }
 

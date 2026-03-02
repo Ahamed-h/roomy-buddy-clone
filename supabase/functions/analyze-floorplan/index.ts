@@ -97,17 +97,6 @@ function getProviders(): AIProvider[] {
     });
   }
 
-  // Fallback to Lovable AI gateway
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
-  if (lovableKey) {
-    providers.push({
-      url: "https://ai.gateway.lovable.dev/v1/chat/completions",
-      key: lovableKey,
-      model: "google/gemini-2.5-pro",
-      name: "Lovable",
-    });
-  }
-
   return providers;
 }
 

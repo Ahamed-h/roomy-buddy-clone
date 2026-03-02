@@ -17,7 +17,7 @@ serve(async (req) => {
     // For image generation, try Gemini first (image gen model), then OpenAI (DALL-E), then Lovable
     const geminiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
     const openaiKey = Deno.env.get("OPENAI_API_KEY");
-    const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+    
 
     // Try Gemini image generation
     if (geminiKey) {
@@ -83,37 +83,6 @@ serve(async (req) => {
         console.error("OpenAI DALL-E failed:", response.status);
       } catch (err) {
         console.error("OpenAI error:", err);
-      }
-    }
-
-    // Fallback to Lovable AI
-    if (lovableKey) {
-      console.log("Trying Lovable AI for image generation...");
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash-image",
-          messages: [{
-            role: "user",
-            content: [
-              { type: "text", text: `Redesign this room with the following style: ${prompt}. Keep the same room layout but transform the style. Make it photorealistic.` },
-              ...(imageBase64 ? [{ type: "image_url", image_url: { url: imageBase64 } }] : []),
-            ],
-          }],
-          modalities: ["image", "text"],
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-        const textContent = data.choices?.[0]?.message?.content || "";
-        if (imageUrl) {
-          return new Response(JSON.stringify({ image_url: imageUrl, description: textContent }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
       }
     }
 
