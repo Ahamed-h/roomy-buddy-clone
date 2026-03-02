@@ -20,6 +20,7 @@ import MidasReconstruction from "./MidasReconstruction";
 import { MOCK_WALLS, MOCK_FURNITURE_ITEMS, getSampleData, FURNITURE_LIBRARY } from "./mockData";
 import type { Wall, Furniture } from "./types";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 const Studio3DEditor = () => {
   const { toast } = useToast();
@@ -39,18 +40,44 @@ const Studio3DEditor = () => {
     toast({ title: "Sample Loaded", description: "Loaded sample floorplan with furniture." });
   };
 
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
       const file = acceptedFiles[0];
       if (!file) return;
       setIsProcessing(true);
-      // For now, load sample data as placeholder for AI analysis
-      await new Promise((r) => setTimeout(r, 1500));
-      const data = getSampleData();
-      setWalls(data.walls);
-      setFurniture(data.furniture);
-      setIsProcessing(false);
-      toast({ title: "Floorplan Analyzed", description: "Loaded detected walls and furniture (demo mode)." });
+      try {
+        const imageBase64 = await fileToBase64(file);
+        const { data, error } = await supabase.functions.invoke("analyze-floorplan", {
+          body: { imageBase64 },
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        setWalls(data.walls || []);
+        setFurniture(data.furniture || []);
+        setSelectedId(null);
+        toast({ title: "AI Analysis Complete", description: `Detected ${data.walls?.length || 0} walls and ${data.furniture?.length || 0} furniture items.` });
+      } catch (err: any) {
+        console.error("Floorplan analysis failed:", err);
+        // Fallback to sample data
+        const sample = getSampleData();
+        setWalls(sample.walls);
+        setFurniture(sample.furniture);
+        toast({
+          title: "AI Analysis Failed",
+          description: "Loaded sample data as fallback. " + (err?.message || ""),
+          variant: "destructive",
+        });
+      } finally {
+        setIsProcessing(false);
+      }
     },
     [toast]
   );
