@@ -248,27 +248,27 @@ Rules:
 - type must be one of: Living Room, Bedroom, Kitchen, Bathroom, Dining Room, Office, Hallway, Garage, Laundry, Storage, Balcony, Unknown
 - impact must be "high", "medium", or "low"`;
 
-async function tryLovableAIVision(imageBase64: string): Promise<any | null> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) {
-    console.log("No LOVABLE_API_KEY, skipping Lovable AI vision");
+async function tryGeminiVision(imageBase64: string): Promise<any | null> {
+  const GEMINI_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY");
+  if (!GEMINI_KEY) {
+    console.log("No GOOGLE_GEMINI_API_KEY, skipping Gemini vision");
     return null;
   }
 
   try {
-    console.log("Trying Lovable AI vision analysis...");
+    console.log("Trying Gemini vision analysis...");
     const imageUrl = imageBase64.startsWith("data:")
       ? imageBase64
       : `data:image/png;base64,${imageBase64}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${GEMINI_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gemini-2.5-flash",
         messages: [
           { role: "system", content: FLOORPLAN_ANALYSIS_PROMPT },
           {
@@ -283,15 +283,14 @@ async function tryLovableAIVision(imageBase64: string): Promise<any | null> {
     });
 
     if (!response.ok) {
-      console.error("Lovable AI vision failed:", response.status, await response.text());
+      console.error("Gemini vision failed:", response.status, await response.text());
       return null;
     }
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
-    console.log("Lovable AI vision raw length:", content.length);
+    console.log("Gemini vision raw length:", content.length);
 
-    // Parse JSON from response
     let jsonStr = content;
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (jsonMatch) jsonStr = jsonMatch[1].trim();
@@ -302,13 +301,13 @@ async function tryLovableAIVision(imageBase64: string): Promise<any | null> {
 
     const parsed = JSON.parse(jsonStr);
     if (parsed.rooms && Array.isArray(parsed.rooms)) {
-      parsed.source = "lovable-ai";
-      console.log(`Lovable AI: ${parsed.rooms.length} rooms, score: ${parsed.score}`);
+      parsed.source = "gemini";
+      console.log(`Gemini: ${parsed.rooms.length} rooms, score: ${parsed.score}`);
       return parsed;
     }
     return null;
   } catch (err) {
-    console.error("Lovable AI vision error:", err);
+    console.error("Gemini vision error:", err);
     return null;
   }
 }
@@ -449,11 +448,11 @@ serve(async (req) => {
       });
     }
 
-    // ── Strategy 2: Lovable AI Vision (FloorPlanAnalysis format) ──
+    // ── Strategy 2: Gemini Vision (FloorPlanAnalysis format) ──
     if (wantFloorPlanFormat) {
-      const lovableResult = await tryLovableAIVision(imageBase64);
-      if (lovableResult) {
-        return new Response(JSON.stringify(lovableResult), {
+      const geminiResult = await tryGeminiVision(imageBase64);
+      if (geminiResult) {
+        return new Response(JSON.stringify(geminiResult), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
