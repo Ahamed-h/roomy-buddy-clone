@@ -4,22 +4,69 @@
 
 - [Node.js](https://nodejs.org/) v18+ (with npm or bun)
 - [Python](https://python.org/) 3.10+
+- [Docker](https://www.docker.com/get-started/) (for RasterScan floor plan analysis)
+- [Ollama](https://ollama.com/) (for local AI chat)
 - A [Supabase](https://supabase.com/) project (already configured if cloned from Lovable)
 - A [Google Cloud](https://console.cloud.google.com/) project (for OAuth)
+
+---
+
+## Quick Start (All Local Services)
+
+Start everything in **4 separate terminals**:
+
+```bash
+# Terminal 1 — RasterScan (floor plan analysis)
+docker run -d -p 8888:8888 --name rasterscan rasterscan/floor-plan-recognition:latest-cpu
+
+# Terminal 2 — Ollama (AI chat)
+ollama pull tinyllama
+ollama serve
+
+# Terminal 3 — ComfyUI (image generation)
+cd ComfyUI
+python main.py --cpu
+
+# Terminal 4 — FastAPI server (main backend)
+cd huggingface
+pip install -r requirements.txt
+python server.py
+```
+
+Then start the frontend:
+
+```bash
+npm install
+npm run dev
+```
+
+### Service Map
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| Frontend (Vite) | 5173 | React app |
+| FastAPI (`server.py`) | 8000 | Main API — analyze, chat, generate |
+| RasterScan (Docker) | 8888 | Floor plan → walls/doors/rooms |
+| ComfyUI | 8188 | AI image generation (Stable Diffusion) |
+| Ollama | 11434 | Local LLM chat (TinyLlama) |
+
+### Fallback Chain
+
+The system is designed to work even if some services are offline:
+
+- **Chat**: Ollama (local) → Lovable AI (cloud via Supabase edge function)
+- **Floor plan analysis**: RasterScan (local Docker) → Gemini → OpenAI
+- **Image generation**: ComfyUI (local) → Direct Gemini/DALL-E → Supabase edge function
+- **Room analysis**: Local ML pipeline (YOLO, MiDaS, etc.) → Ollama vision → Cloud AI
 
 ---
 
 ## 1. Frontend Setup
 
 ```bash
-# Clone the repo
 git clone <YOUR_GIT_URL>
 cd <YOUR_PROJECT_NAME>
-
-# Install dependencies
 npm install
-
-# Start dev server
 npm run dev
 ```
 
@@ -89,37 +136,182 @@ Then configure in Supabase:
 
 ### 2c. Edge Functions
 
-The `design-chat` edge function is auto-deployed by Lovable. It uses the `LOVABLE_API_KEY` secret (already configured). If running Supabase locally:
+Edge functions are auto-deployed by Lovable. Available functions:
+
+| Function | Purpose |
+|----------|---------|
+| `design-chat` | AI chat assistant (Gemini/OpenAI) |
+| `generate-image` | AI image generation |
+| `analyze-floorplan` | Floor plan analysis (RasterScan → Gemini → OpenAI) |
+| `verify-analysis` | Verify room analysis results |
+
+If running Supabase locally:
 
 ```bash
 supabase start
-supabase functions serve design-chat --env-file .env.local
+supabase functions serve --env-file .env.local
 ```
 
 ---
 
-## 3. ML Backend Setup (Local Server)
+## 3. Local AI Services
 
-The frontend expects a local ML server at `http://localhost:8000`.
+### 3a. Ollama — Chat AI (TinyLlama)
 
-### 3a. Install Python Dependencies
+Ollama provides local LLM inference. TinyLlama (1.1B params) runs comfortably on CPU with ~1GB RAM.
 
 ```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh   # Linux/macOS
+# Windows: download from https://ollama.com/download
+
+# Pull TinyLlama model (~600MB)
+ollama pull tinyllama
+
+# Start server (runs on port 11434)
+ollama serve
+```
+
+**Verify it works:**
+
+```bash
+curl http://localhost:11434/api/generate -d '{"model":"tinyllama","prompt":"Hello","stream":false}'
+```
+
+**Expected performance** (i5 CPU, 16GB RAM):
+- 1–3 seconds per response
+- ~1GB RAM usage
+- No GPU required
+
+**Optional upgrade**: For better reasoning, try `ollama pull phi` (Phi-2, ~1.7GB).
+
+### 3b. RasterScan — Floor Plan Analysis (Docker)
+
+RasterScan extracts walls, doors, and rooms from floor plan images.
+
+```bash
+# Pull the CPU image (~2GB)
+docker pull rasterscan/floor-plan-recognition:latest-cpu
+
+# Run on port 8888
+docker run -d -p 8888:8888 --name rasterscan rasterscan/floor-plan-recognition:latest-cpu
+```
+
+**Verify it works:**
+
+```bash
+curl http://localhost:8888/health
+```
+
+**API endpoint**: `POST http://localhost:8888/raster-to-vector-base64` — accepts `{"image": "<base64>"}`.
+
+### 3c. ComfyUI — Image Generation
+
+ComfyUI runs Stable Diffusion pipelines locally for room redesigns.
+
+```bash
+# Clone ComfyUI
+git clone https://github.com/comfyanonymous/ComfyUI.git
+cd ComfyUI
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Download models (place in ComfyUI/models/checkpoints/)
+# - DreamShaper v8 (~2GB): https://civitai.com/models/4384
+# - ControlNet Depth (~1.5GB): place in ComfyUI/models/controlnet/
+
+# Start on CPU (slower but no GPU needed)
+python main.py --cpu
+```
+
+**Runs on**: `http://127.0.0.1:8188`
+
+**Expected performance** (CPU): 40–90 seconds per 512×512 image.
+
+The `workflow.json` in `huggingface/` defines the pipeline:
+- Node 6: Input image loader
+- Node 11: Positive style prompt
+- Node 12: Negative prompt
+
+---
+
+## 4. FastAPI Backend (`server.py`)
+
+The main backend coordinates all AI services.
+
+```bash
+cd huggingface
+
 # Create virtual environment
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# Install CPU-only PyTorch (no GPU required)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# Install dependencies
+pip install -r requirements.txt
 
-# Install remaining dependencies
-pip install fastapi uvicorn[standard] python-multipart Pillow
+# Run server
+python server.py
+```
+
+**Runs on**: `http://localhost:8000`
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Health check (shows device info) |
+| `/health` | GET | Model loading status |
+| `/analyze` | POST | Upload room image → full ML analysis |
+| `/design/generate/2d/repaint` | POST | Room redesign via ComfyUI |
+| `/design/chat` | POST | AI chat (Ollama → Lovable AI fallback) |
+| `/design/enhance_prompt` | POST | Enhance prompt with evaluation data |
+
+### Chat Endpoint Details
+
+`POST /design/chat` accepts:
+- `session_id` (form) — session identifier
+- `message` (form) — user message
+- `include_analysis` (form, optional) — set `true` to inject last room analysis into context
+
+Returns structured JSON:
+
+```json
+{
+  "response": "I suggest a modern minimalist redesign...",
+  "action": "generate",
+  "style_prompt": "modern minimalist living room, wooden floor...",
+  "image_url": "http://127.0.0.1:8188/view?filename=ComfyUI_001.png"
+}
+```
+
+When `action` is `"generate"`, the backend auto-triggers ComfyUI and returns the generated image URL.
+
+### Environment Variables (Optional)
+
+```bash
+export SUPABASE_URL="https://<project-id>.supabase.co"
+export SUPABASE_ANON_KEY="<anon-key>"
+```
+
+These are used for the Lovable AI fallback when Ollama is offline. Defaults are built in.
+
+---
+
+## 5. ML Backend Setup (Heavy Pipeline)
+
+For the full ML analysis pipeline (YOLO, SAM, MiDaS, CLIP), additional setup is needed.
+
+### 5a. Install ML Dependencies
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install ultralytics transformers open-clip-torch timm
 pip install opencv-python-headless scipy numpy scikit-image
 pip install tensorflow
 ```
 
-### 3b. Required Model Weights
+### 5b. Required Model Weights
 
 Place these files in a `models/` directory:
 
@@ -131,39 +323,14 @@ Place these files in a `models/` directory:
 | `design_feature_extractor.pth` | ~20 MB | Feature extraction |
 | `ranking_aesthetic_model.pth` | ~5 MB | Aesthetic scoring |
 
-### 3c. Required Files
+### 5c. Required Files
 
-- `master_engine.py` — Main analysis engine (your custom code)
+- `master_engine.py` — Main analysis engine
 - `trait_rules.json` — Style trait definitions
-
-### 3d. Run the Server
-
-```bash
-python -m uvicorn app:app --host 0.0.0.0 --port 8000
-```
-
-The server exposes:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Health check |
-| `/health` | GET | Simple health check |
-| `/analyze` | POST | Upload room image → full analysis JSON |
-| `/design/enhance_prompt` | POST | Enhance a redesign prompt with evaluation data |
-| `/design/generate/2d/repaint` | POST | Generate a 2D room redesign |
-| `/design/chat` | POST | Conversational AI design assistant |
-
-### 3e. Design Studio — "Add Evaluation Result?"
-
-In the 2D Design tab, the **"Add evaluation result?"** toggle controls whether your room's ML analysis data (aesthetic score, detected style, recommendations) is included when generating redesigns. When enabled, the AI uses your evaluation to produce more context-aware results. Run analysis first, then toggle this on before requesting a redesign.
-
-### 3f. Changing the Server URL
-
-Users can change the backend URL in the Evaluate page settings. The default is stored in `localStorage` under `roomform_hf_url`.
 
 ---
 
-## 4. Alternative: Hugging Face Spaces Deployment
+## 6. Alternative: Hugging Face Spaces Deployment
 
 For GPU-powered inference, deploy to HF Spaces:
 
@@ -177,7 +344,7 @@ See [`huggingface/SETUP_GUIDE.md`](huggingface/SETUP_GUIDE.md) for detailed inst
 
 ---
 
-## 5. Project Structure
+## 7. Project Structure
 
 ```
 ├── src/
@@ -189,16 +356,22 @@ See [`huggingface/SETUP_GUIDE.md`](huggingface/SETUP_GUIDE.md) for detailed inst
 │   ├── integrations/       # Supabase client & types
 │   ├── lib/                # Utilities & design CRUD
 │   ├── pages/              # Route pages
-│   └── services/           # API service layer
+│   └── services/           # API service layer (ollama, directAI, api)
 ├── supabase/
-│   └── functions/          # Edge functions (design-chat)
-├── huggingface/            # HF Spaces deployment files
+│   └── functions/          # Edge functions (design-chat, analyze-floorplan, etc.)
+├── huggingface/            # Local backend + HF deployment files
+│   ├── server.py           # Main FastAPI server
+│   ├── app.py              # HF Spaces entrypoint
+│   ├── room_ai_engine.py   # ML analysis engine
+│   ├── comfyui_bridge.py   # ComfyUI integration
+│   ├── workflow.json       # ComfyUI pipeline definition
+│   └── requirements.txt    # Python dependencies
 └── public/                 # Static assets
 ```
 
 ---
 
-## 6. Available Scripts
+## 8. Available Scripts
 
 | Command | Description |
 |---------|-------------|
@@ -209,9 +382,38 @@ See [`huggingface/SETUP_GUIDE.md`](huggingface/SETUP_GUIDE.md) for detailed inst
 
 ---
 
+## 9. Design Studio Features
+
+### 2D Design Tab
+
+- Upload a room photo for AI analysis
+- Select room type and design themes
+- Generate redesigns using ComfyUI (local) or cloud AI
+- Chat with RoomBot for design suggestions
+- The **"Add evaluation result?"** toggle injects ML analysis data into redesign prompts
+
+### 3D Design Tab
+
+- Upload floor plan images for automatic wall/room detection
+- Manually add walls and furniture
+- Switch between 2D editor and 3D viewer
+- Furniture marketplace with drag-and-drop placement
+
+### Changing the Server URL
+
+Users can change the backend URL in the Evaluate page settings. The default is stored in `localStorage` under `roomform_hf_url`.
+
+---
+
 ## Troubleshooting
 
-- **Google Sign In not working**: Ensure redirect URL matches exactly in both Google Cloud and Supabase dashboard
-- **"Analysis failed" on Evaluate**: Check that the local ML server is running at `http://localhost:8000`
-- **Dashboard empty**: Sign in first — designs are user-scoped via RLS
-- **Edge function errors**: Check logs at [Supabase Functions Dashboard](https://supabase.com/dashboard/project/whlzqtupucxeqkaqmcds/functions/design-chat/logs)
+| Issue | Solution |
+|-------|----------|
+| Google Sign In not working | Ensure redirect URL matches exactly in Google Cloud and Supabase |
+| "Analysis failed" on Evaluate | Check local ML server is running at `http://localhost:8000` |
+| Dashboard empty | Sign in first — designs are user-scoped via RLS |
+| Edge function errors | Check [Supabase Functions logs](https://supabase.com/dashboard/project/whlzqtupucxeqkaqmcds/functions) |
+| Chat says "all providers offline" | Start Ollama (`ollama serve`) or check Supabase edge function |
+| ComfyUI generation timeout | CPU mode is slow (40-90s). Check ComfyUI terminal for errors |
+| RasterScan not responding | Run `docker ps` to verify container is running on port 8888 |
+| Ollama slow/hanging | TinyLlama needs ~1GB free RAM. Close other heavy apps |
