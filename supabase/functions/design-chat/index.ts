@@ -26,17 +26,50 @@ function getProviders(): AIProvider[] {
   return providers;
 }
 
+function buildFloorplanSystemPrompt(rooms: any[]) {
+  return `You are ArchAI, an expert architectural floor plan editor. The user has a floor plan with these rooms:
+
+${JSON.stringify(rooms, null, 2)}
+
+Each room has: id, type, label, estimatedSqFt, x, y, width, height (x/y/width/height are PERCENTAGES 0-100 of image dimensions), notes.
+
+When the user asks to modify the floor plan, respond with:
+1. A brief natural language explanation of what you changed
+2. A JSON block with the updated rooms array wrapped in \`\`\`rooms ... \`\`\`
+
+Example response:
+"I've enlarged the kitchen by extending it eastward and added a new pantry room."
+\`\`\`rooms
+[{"id":"r1","type":"Kitchen","label":"Kitchen","estimatedSqFt":180,"x":30,"y":10,"width":25,"height":20,"notes":"Expanded east"},{"id":"r_new_1","type":"Storage","label":"Pantry","estimatedSqFt":40,"x":55,"y":10,"width":8,"height":12,"notes":"New pantry"}]
+\`\`\`
+
+Rules:
+- ALWAYS return the FULL rooms array (all rooms, not just changed ones)
+- Keep x, y, width, height as percentages (0-100)
+- Preserve room ids for existing rooms, use "r_new_X" for new rooms
+- Rooms should not overlap significantly
+- Be realistic about proportions and architectural constraints
+- If the user asks a question without requesting changes, just answer naturally without the rooms block
+- Keep explanations concise and friendly`;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { messages, roomContext } = await req.json();
+    const { messages, roomContext, floorplanRooms } = await req.json();
     const providers = getProviders();
     if (providers.length === 0) throw new Error("No AI API keys configured");
 
-    let systemPrompt = `You are RoomBot, an expert AI interior design assistant inside the aivo Design Studio. You help users design and furnish their rooms.
+    let systemPrompt: string;
+
+    // Floorplan editing mode
+    if (floorplanRooms) {
+      systemPrompt = buildFloorplanSystemPrompt(floorplanRooms);
+    } else {
+      systemPrompt = `You are RoomBot, an expert AI interior design assistant inside the aivo Design Studio. You help users design and furnish their rooms.
 
 Your capabilities:
 - Give layout advice and furniture placement suggestions
@@ -51,13 +84,14 @@ When a user asks to add furniture, respond naturally and include a JSON block:
 
 Keep responses concise, friendly, and actionable.`;
 
-    if (roomContext) {
-      systemPrompt += `\n\nCurrent room context:
+      if (roomContext) {
+        systemPrompt += `\n\nCurrent room context:
 - Aesthetic score: ${roomContext.aesthetic_score || "N/A"}/10
 - Brightness: ${roomContext.brightness || "N/A"}%
 - Objects: ${roomContext.objects?.map((o: any) => o.label).join(", ") || "none"}
 - Styles: ${roomContext.top_styles?.map((s: any) => `${s.style} (${Math.round(s.score * 100)}%)`).join(", ") || "unknown"}
 - Recommendations: ${roomContext.recommendations?.join("; ") || "none"}`;
+      }
     }
 
     const allMessages = [{ role: "system", content: systemPrompt }, ...messages];

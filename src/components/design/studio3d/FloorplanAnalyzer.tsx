@@ -1,5 +1,9 @@
-import React, { useState, useRef, useCallback, useMemo } from "react";
+import React, { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 import type { AnalyzedRoom, FloorplanAnalysis, Recommendation } from "./types";
+import { supabase } from "@/integrations/supabase/client";
+import { isOllamaAvailable, ollamaChat } from "@/services/ollama";
+import { directChat, hasDirectKeys } from "@/services/directAI";
 
 /* ═══════════════════════════════════════════════════════════════
    ROOM COLORS
@@ -502,6 +506,222 @@ function DiffBadge({ originalRooms, updatedRooms }: { originalRooms: AnalyzedRoo
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   CHAT PANEL — AI-powered floorplan editing via natural language
+═══════════════════════════════════════════════════════════════ */
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+function parseRoomsFromResponse(text: string): AnalyzedRoom[] | null {
+  const match = text.match(/```rooms\s*([\s\S]*?)```/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1].trim());
+    if (Array.isArray(parsed)) return parsed;
+  } catch { /* ignore */ }
+  return null;
+}
+
+function buildFloorplanChatPrompt(rooms: AnalyzedRoom[]): string {
+  return `You are ArchAI, an expert architectural floor plan editor. The user has a floor plan with these rooms:
+
+${JSON.stringify(rooms, null, 2)}
+
+Each room has: id, type, label, estimatedSqFt, x, y, width, height (x/y/width/height are PERCENTAGES 0-100 of image dimensions), notes.
+
+When the user asks to modify the floor plan, respond with:
+1. A brief natural language explanation of what you changed
+2. A JSON block with the updated rooms array wrapped in \`\`\`rooms ... \`\`\`
+
+Example:
+"I've enlarged the kitchen by extending it eastward."
+\`\`\`rooms
+[{"id":"r1","type":"Kitchen","label":"Kitchen","estimatedSqFt":180,"x":30,"y":10,"width":25,"height":20,"notes":"Expanded east"}]
+\`\`\`
+
+Rules:
+- ALWAYS return the FULL rooms array (all rooms, not just changed ones)
+- Keep x, y, width, height as percentages (0-100)
+- Preserve room ids for existing rooms, use "r_new_X" for new rooms
+- Rooms should not overlap significantly
+- Be realistic about proportions and architectural constraints
+- If the user asks a question without requesting changes, just answer naturally without the rooms block`;
+}
+
+function ChatPanel({ rooms, onApplyRooms }: {
+  rooms: AnalyzedRoom[];
+  onApplyRooms: (rooms: AnalyzedRoom[]) => void;
+}) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [pendingRooms, setPendingRooms] = useState<AnalyzedRoom[] | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  const sendMessage = useCallback(async () => {
+    const text = input.trim();
+    if (!text || isLoading) return;
+
+    const userMsg: ChatMessage = { role: "user", content: text };
+    const allMessages = [...messages, userMsg];
+    setMessages(allMessages);
+    setInput("");
+    setIsLoading(true);
+    setPendingRooms(null);
+
+    try {
+      let fullResponse = "";
+      const apiMessages = allMessages.map(m => ({ role: m.role, content: m.content }));
+
+      // Try Ollama first
+      const ollamaOnline = await isOllamaAvailable();
+      if (ollamaOnline) {
+        try {
+          const systemMsg = { role: "system", content: buildFloorplanChatPrompt(rooms) };
+          const resp = await ollamaChat([systemMsg, ...apiMessages]);
+          if (resp.ok) {
+            const data = await resp.json();
+            fullResponse = data.choices?.[0]?.message?.content || "";
+          }
+        } catch (err) {
+          console.warn("Ollama chat failed:", err);
+        }
+      }
+
+      // Try direct API
+      if (!fullResponse && hasDirectKeys()) {
+        try {
+          fullResponse = await directChat(apiMessages, buildFloorplanChatPrompt(rooms));
+        } catch (err) {
+          console.warn("Direct API chat failed:", err);
+        }
+      }
+
+      // Fallback to Supabase edge function
+      if (!fullResponse) {
+        const { data, error } = await supabase.functions.invoke("design-chat", {
+          body: { messages: apiMessages, floorplanRooms: rooms },
+        });
+
+        if (error) throw error;
+
+        if (typeof data === "string") {
+          for (const line of data.split("\n")) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data: ")) continue;
+            const jsonStr = trimmed.slice(6);
+            if (jsonStr === "[DONE]") break;
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const delta = parsed.choices?.[0]?.delta?.content || "";
+              fullResponse += delta;
+            } catch { /* skip */ }
+          }
+        } else if (data?.choices) {
+          fullResponse = data.choices[0]?.message?.content || "";
+        } else if (data?.error) {
+          throw new Error(data.error);
+        }
+      }
+
+      if (!fullResponse) {
+        fullResponse = "Sorry, I couldn't process that request. Please try again.";
+      }
+
+      // Check for room changes
+      const newRooms = parseRoomsFromResponse(fullResponse);
+      if (newRooms) setPendingRooms(newRooms);
+
+      // Strip rooms JSON block for display
+      const displayText = fullResponse.replace(/```rooms[\s\S]*?```/g, "").trim();
+      setMessages(prev => [...prev, { role: "assistant", content: displayText || "Changes are ready to apply." }]);
+    } catch (err: any) {
+      console.error("Chat error:", err);
+      setMessages(prev => [...prev, { role: "assistant", content: `❌ Error: ${err?.message || "Unknown error"}` }]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [input, messages, rooms, isLoading]);
+
+  return (
+    <div className="flex flex-col h-full">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-2 mb-2 min-h-0">
+        {messages.length === 0 && (
+          <div className="text-white/30 text-[11px] text-center py-6 leading-relaxed">
+            💬 Ask me to edit the floor plan!<br />
+            <span className="text-[10px]">e.g. "Make the kitchen bigger" or "Add a bathroom"</span>
+          </div>
+        )}
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            className={`p-2 rounded-lg text-[11px] leading-relaxed ${
+              msg.role === "user"
+                ? "bg-[#4a90e2]/20 text-[#93c5fd] ml-4"
+                : "bg-white/5 text-white/80 mr-4"
+            }`}
+          >
+            {msg.role === "assistant" ? (
+              <div className="prose prose-invert prose-xs max-w-none [&>p]:mb-1 [&>p]:text-[11px]">
+                <ReactMarkdown>{msg.content}</ReactMarkdown>
+              </div>
+            ) : (
+              msg.content
+            )}
+          </div>
+        ))}
+        {isLoading && (
+          <div className="p-2 rounded-lg bg-white/5 text-white/40 text-[11px] mr-4">
+            <span className="animate-pulse">Thinking...</span>
+          </div>
+        )}
+      </div>
+
+      {pendingRooms && (
+        <div className="flex gap-1.5 mb-2">
+          <button
+            onClick={() => { onApplyRooms(pendingRooms); setPendingRooms(null); }}
+            className="flex-1 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/30 transition-all"
+          >
+            ✓ Apply Changes
+          </button>
+          <button
+            onClick={() => setPendingRooms(null)}
+            className="px-3 py-1.5 rounded-lg text-[11px] bg-white/5 border border-white/10 text-white/40 hover:text-white/60 transition-all"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      <div className="flex gap-1.5">
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()}
+          placeholder="e.g. Make the kitchen bigger..."
+          disabled={isLoading}
+          className="flex-1 bg-[#0d1225] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white/80 placeholder:text-white/20 focus:outline-none focus:border-[#4a90e2] disabled:opacity-50"
+        />
+        <button
+          onClick={sendMessage}
+          disabled={isLoading || !input.trim()}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-30"
+          style={{ background: "linear-gradient(135deg,#3B82F6,#2563EB)", color: "#fff" }}
+        >
+          ➤
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
    APPLY RECOMMENDATIONS HELPER
 ═══════════════════════════════════════════════════════════════ */
 function applyRecommendations(rooms: AnalyzedRoom[], recommendations: Recommendation[], selectedIds: string[]): AnalyzedRoom[] {
@@ -538,7 +758,7 @@ const FloorplanAnalyzer: React.FC<FloorplanAnalyzerProps> = ({ imgUrl, analysis,
   const [updatedRooms, setUpdatedRooms] = useState<AnalyzedRoom[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedRecs, setSelectedRecs] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<"insights" | "legend" | "edit" | "recommend">("insights");
+  const [activeTab, setActiveTab] = useState<"insights" | "legend" | "edit" | "recommend" | "chat">("insights");
   const [applied, setApplied] = useState(false);
 
   // Detect image dimensions
@@ -608,6 +828,11 @@ const FloorplanAnalyzer: React.FC<FloorplanAnalyzerProps> = ({ imgUrl, analysis,
   const discardChanges = useCallback(() => {
     setUpdatedRooms(null);
     setApplied(false);
+  }, []);
+
+  const applyRoomsFromChat = useCallback((newRooms: AnalyzedRoom[]) => {
+    setUpdatedRooms(newRooms);
+    setApplied(true);
   }, []);
 
   const displayRooms = (applied && updatedRooms) ? updatedRooms : rooms;
@@ -708,6 +933,7 @@ const FloorplanAnalyzer: React.FC<FloorplanAnalyzerProps> = ({ imgUrl, analysis,
             ["legend", "🗂"],
             ["edit", "✎"],
             ["recommend", "✨"],
+            ["chat", "💬"],
           ] as const).map(([id, icon]) => (
             <button
               key={id}
@@ -723,8 +949,7 @@ const FloorplanAnalyzer: React.FC<FloorplanAnalyzerProps> = ({ imgUrl, analysis,
           ))}
         </div>
 
-        {/* Panel content */}
-        <div className="flex-1 overflow-y-auto rounded-xl bg-white/5 border border-white/10 p-3">
+        <div className="flex-1 overflow-y-auto rounded-xl bg-white/5 border border-white/10 p-3 flex flex-col">
           {activeTab === "insights" && analysis && <Insights analysis={analysis} />}
           {activeTab === "legend" && <Legend rooms={displayRooms} />}
           {activeTab === "edit" && (
@@ -742,6 +967,12 @@ const FloorplanAnalyzer: React.FC<FloorplanAnalyzerProps> = ({ imgUrl, analysis,
               onToggle={toggleRec}
               onApply={applyRecs}
               applying={false}
+            />
+          )}
+          {activeTab === "chat" && (
+            <ChatPanel
+              rooms={displayRooms}
+              onApplyRooms={applyRoomsFromChat}
             />
           )}
         </div>
