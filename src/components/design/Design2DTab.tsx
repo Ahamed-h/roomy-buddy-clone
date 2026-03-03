@@ -325,11 +325,20 @@ const Design2DTab = () => {
         { role: "user", content: msg },
       ];
 
+      // Always pass analysis context to edge function for grounded responses
+      const roomContext = analysisResult || null;
+
+      // Build grounded system prompt for local/direct fallbacks
+      const groundedSystemPrompt = roomContext
+        ? `You are an expert interior designer assistant. The room has these detected objects: ${roomContext.objects?.slice(0, 5).map((o: any) => `${o.name || o.label}(${o.material || 'unknown'})`).join(", ") || "none"}. Style: ${roomContext.possible_styles?.slice(0, 2).join(", ") || "unknown"}. Aesthetic score: ${roomContext.aesthetic_score || "N/A"}/10. Reference these facts in your response. Be specific and actionable.`
+        : "You are an expert interior designer assistant. Help users with room design, furniture selection, color palettes, and style advice. Be specific and actionable.";
+
       // Try Ollama first
       const ollamaOnline = await isOllamaAvailable();
       if (ollamaOnline) {
         try {
-          const stream = await ollamaChatStream(chatMessages);
+          const ollamaMessages = [{ role: "system", content: groundedSystemPrompt }, ...chatMessages];
+          const stream = await ollamaChatStream(ollamaMessages);
           if (stream) {
             const reader = stream.getReader();
             const decoder = new TextDecoder();
@@ -361,8 +370,7 @@ const Design2DTab = () => {
       // Try direct API
       if (hasDirectKeys()) {
         try {
-          const systemPrompt = "You are an expert interior designer assistant. Help users with room design, furniture selection, color palettes, and style advice. Be specific and actionable.";
-          const directResponse = await directChat(chatMessages, systemPrompt);
+          const directResponse = await directChat(chatMessages, groundedSystemPrompt);
           if (directResponse) {
             addMessage("ai", directResponse);
             return;
@@ -372,8 +380,7 @@ const Design2DTab = () => {
         }
       }
 
-      // Fallback to edge function
-      const roomContext = includeEvaluation ? analysisResult : null;
+      // Fallback to edge function (roomContext already declared above)
       const { data: streamData, error } = await supabase.functions.invoke("design-chat", {
         body: { messages: chatMessages, roomContext },
       });

@@ -16,6 +16,7 @@ import { analyzeRoom, getHfSpacesUrl, setHfSpacesUrl, type AnalysisResult } from
 import { useAuth } from "@/contexts/AuthContext";
 import { saveDesign } from "@/lib/designs";
 import { supabase } from "@/integrations/supabase/client";
+import RoomInsight from "@/components/RoomInsight";
 
 const Evaluate = () => {
   const { user } = useAuth();
@@ -284,6 +285,9 @@ const Evaluate = () => {
                 </CardContent>
               </Card>
             )}
+
+            {/* Room Insight Panel */}
+            <RoomInsight analysis={result} />
 
             {/* Metric Cards */}
             <div className="grid gap-4 md:grid-cols-3">
