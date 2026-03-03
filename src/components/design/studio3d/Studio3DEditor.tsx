@@ -84,6 +84,64 @@ function parseAnalysisJSON(raw: string): FloorplanAnalysis {
   return JSON.parse(jsonStr);
 }
 
+/** Convert percentage-based rooms into metric walls & furniture for the 3D view */
+function roomsTo3D(analysis: FloorplanAnalysis): { walls: Wall[]; furniture: Furniture[] } {
+  // Assume a 20m x 20m real-world space mapped from 0-100% coordinates
+  const SCALE = 0.2; // 1% = 0.2m
+  const wallList: Wall[] = [];
+  const furnitureList: Furniture[] = [];
+
+  analysis.rooms.forEach((room) => {
+    const x1 = room.x * SCALE;
+    const y1 = room.y * SCALE;
+    const x2 = (room.x + room.width) * SCALE;
+    const y2 = (room.y + room.height) * SCALE;
+    const prefix = room.id;
+
+    // 4 walls per room
+    wallList.push(
+      { id: `${prefix}-wt`, start: { x: x1, y: y1 }, end: { x: x2, y: y1 }, thickness: 0.12 },
+      { id: `${prefix}-wr`, start: { x: x2, y: y1 }, end: { x: x2, y: y2 }, thickness: 0.12 },
+      { id: `${prefix}-wb`, start: { x: x2, y: y2 }, end: { x: x1, y: y2 }, thickness: 0.12 },
+      { id: `${prefix}-wl`, start: { x: x1, y: y2 }, end: { x: x1, y: y1 }, thickness: 0.12 },
+    );
+
+    // Place a label-furniture marker at center of each room
+    const cx = (x1 + x2) / 2;
+    const cy = (y1 + y2) / 2;
+    const rw = (x2 - x1);
+    const rh = (y2 - y1);
+
+    // Add contextual furniture based on room type
+    const t = room.type.toLowerCase();
+    if (t.includes("bed")) {
+      furnitureList.push({ id: `${prefix}-bed`, type: "bed", label: room.label, position: { x: cx, y: cy }, rotation: 0, width: Math.min(rw * 0.5, 2), depth: Math.min(rh * 0.5, 2), height: 0.6 });
+    } else if (t.includes("living")) {
+      furnitureList.push({ id: `${prefix}-sofa`, type: "sofa", label: room.label, position: { x: cx, y: cy }, rotation: 0, width: Math.min(rw * 0.5, 2.2), depth: Math.min(rh * 0.3, 0.9), height: 0.8 });
+    } else if (t.includes("kitchen") || t.includes("dining")) {
+      furnitureList.push({ id: `${prefix}-table`, type: "table", label: room.label, position: { x: cx, y: cy }, rotation: 0, width: Math.min(rw * 0.4, 1.2), depth: Math.min(rh * 0.3, 0.8), height: 0.75 });
+    } else if (t.includes("bath")) {
+      furnitureList.push({ id: `${prefix}-toilet`, type: "toilet", label: room.label, position: { x: cx, y: cy }, rotation: 0, width: 0.4, depth: 0.7, height: 0.4 });
+    } else if (t.includes("office")) {
+      furnitureList.push({ id: `${prefix}-desk`, type: "table", label: room.label, position: { x: cx, y: cy }, rotation: 0, width: Math.min(rw * 0.4, 1.4), depth: Math.min(rh * 0.3, 0.7), height: 0.75 });
+    }
+  });
+
+  // Deduplicate overlapping walls (shared between adjacent rooms)
+  const wallMap = new Map<string, Wall>();
+  wallList.forEach((w) => {
+    const key = [
+      Math.min(w.start.x, w.end.x).toFixed(2),
+      Math.min(w.start.y, w.end.y).toFixed(2),
+      Math.max(w.start.x, w.end.x).toFixed(2),
+      Math.max(w.start.y, w.end.y).toFixed(2),
+    ].join(",");
+    if (!wallMap.has(key)) wallMap.set(key, w);
+  });
+
+  return { walls: Array.from(wallMap.values()), furniture: furnitureList };
+}
+
 const Studio3DEditor = () => {
   const { toast } = useToast();
   const sceneRef = useRef<SceneViewer3DHandle>(null);
@@ -169,6 +227,12 @@ const Studio3DEditor = () => {
 
         if (result) {
           setAnalysis(result);
+          // Convert rooms to 3D walls & furniture
+          if (result.rooms && result.rooms.length > 0) {
+            const scene3d = roomsTo3D(result);
+            setWalls(scene3d.walls);
+            setFurniture(scene3d.furniture);
+          }
           toast({
             title: "AI Analysis Complete",
             description: `Detected ${result.rooms?.length || 0} rooms. Score: ${result.score?.toFixed(1) || "N/A"}/10`,
