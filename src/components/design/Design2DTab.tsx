@@ -111,6 +111,7 @@ const Design2DTab = () => {
       setAnalysisResult(data);
 
       setPipelineStep("AI verifying results...");
+      let verifiedData = data;
       try {
         const b64 = await fileToBase64(file);
         
@@ -124,36 +125,44 @@ const Design2DTab = () => {
             const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
             const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw.trim();
             const verified = JSON.parse(jsonStr);
-            if (verified) { setAnalysisResult(verified); return; }
+            if (verified) { verifiedData = { ...data, ...verified }; setAnalysisResult(verifiedData); }
           } catch (err) {
-            console.warn("Ollama verify failed, trying cloud:", err);
+            console.warn("Ollama verify failed, trying next:", err);
           }
         }
 
-        // Try direct API
-        if (hasDirectKeys()) {
+        // Try direct API if not yet verified
+        if (verifiedData === data && hasDirectKeys()) {
           try {
             const verifyPrompt = `You are an interior design AI verifier. Cross-check these ML results against the photo. Return corrected JSON with: aesthetic_score, lighting.brightness, objects, style_match_scores, possible_styles, recommendations.\n\nML Results:\n${JSON.stringify(data, null, 2)}`;
             const raw = await directVision(verifyPrompt, b64);
             const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
             const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw.trim();
             const verified = JSON.parse(jsonStr);
-            if (verified) { setAnalysisResult(verified); return; }
+            if (verified) { verifiedData = { ...data, ...verified }; setAnalysisResult(verifiedData); }
           } catch (err) {
             console.warn("Direct API verify failed, trying Supabase:", err);
           }
         }
 
-        // Fallback to edge function
-        const { data: verified, error } = await supabase.functions.invoke("verify-analysis", {
-          body: { analysisResult: data, imageBase64: b64 },
-        });
-        if (!error && verified?.corrected) setAnalysisResult(verified.corrected);
-      } catch {}
+        // Fallback to edge function if still not verified
+        if (verifiedData === data) {
+          const { data: verified, error } = await supabase.functions.invoke("verify-analysis", {
+            body: { analysisResult: data, imageBase64: b64 },
+          });
+          if (!error && verified && !verified.error) {
+            verifiedData = { ...data, ...verified };
+            setAnalysisResult(verifiedData);
+          }
+        }
+      } catch (err) {
+        console.warn("AI verification failed:", err);
+      }
 
-      const topStyles = data.possible_styles?.slice(0, 3).join(", ") || "mixed";
-      const objectNames = data.objects?.map((o: any) => o.name || o.label).slice(0, 6).join(", ") || "none detected";
-      addMessage("ai", `✅ **Analysis complete!**\n\n**Style:** ${topStyles}\n**Objects:** ${objectNames}\n**Score:** ${data.aesthetic_score}/10\n\nSelect themes and click Redesign, or tell me what changes you'd like!`);
+      const topStyles = verifiedData.possible_styles?.slice(0, 3).join(", ") || "mixed";
+      const objectNames = verifiedData.objects?.map((o: any) => o.name || o.label).slice(0, 6).join(", ") || "none detected";
+      const verified = verifiedData !== data;
+      addMessage("ai", `✅ **Analysis complete${verified ? " & AI verified" : ""}!**\n\n**Style:** ${topStyles}\n**Objects:** ${objectNames}\n**Score:** ${verifiedData.aesthetic_score}/10\n\nSelect themes and click Redesign, or tell me what changes you'd like!`);
     } catch {
       addMessage("ai", "⚠️ Analysis unavailable — select themes and I'll generate a redesign directly.");
     } finally {
