@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 import json
 import requests
-import base64
+import time
 
 load_dotenv()
 
@@ -16,39 +16,35 @@ from room_ai_engine import analyze_room
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEMP_DIR = "temp_uploads"
-MODELS_DIR = "models"
+
+COMFY_URL = "http://127.0.0.1:8188"
+WORKFLOW_FILE = "workflow.json"
+
+# 👇 IMPORTANT: change if your ComfyUI path differs
+COMFY_INPUT_DIR = "ComfyUI/input"
 
 os.makedirs(TEMP_DIR, exist_ok=True)
-os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
-# 🔥 Global model cache flag
 _models_loaded = False
 
 
-# ⭐ Lifespan (startup/shutdown)
+# ================= LIFESPAN =================
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _models_loaded
-    
-    print("🚀 Server ready! /analyze = 500ms after first request")
-    
-    # Preload models here if needed
-    # analyze_room("dummy.jpg")
-    
+    print("🚀 Server ready!")
     yield
-    
     print("🛑 Server shutting down")
 
 
-# ⭐ Create app ONLY ONCE
 app = FastAPI(
     title="AI Interior Design Engine v1.0",
     lifespan=lifespan
 )
 
+# ================= CORS =================
 
-# ⭐ CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,17 +53,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ⭐ Static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+# ================= ROOT =================
+
 @app.get("/")
 async def root():
-    return {
-        "status": "AI Interior Design Engine v1.0",
-        "device": DEVICE,
-        "endpoints": ["/analyze", "/design/generate/2d/repaint", "/design/chat", "/design/enhance_prompt"]
-    }
+    return {"status": "Running", "device": DEVICE}
 
 
 @app.get("/health")
@@ -75,57 +68,7 @@ async def health():
     return {"status": "healthy", "models_loaded": _models_loaded}
 
 
-# ================== OLLAMA VISION (FAST PATH) ==================
-
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-
-def analyze_with_ollama(image_path: str):
-    """Try Qwen2.5-VL via Ollama for fast local analysis."""
-    try:
-        with open(image_path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode()
-
-        response = requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={
-                "model": "qwen2.5-vl:3b",
-                "prompt": (
-                    "Analyze this room or floor plan image. Return a JSON object with: "
-                    "aesthetic_score (0-100), brightness (0-100), objects (list of {name, confidence}), "
-                    "style_scores (object with style names and 0-1 scores), "
-                    "recommendations (list of strings), and room_type (string). "
-                    "Return ONLY valid JSON."
-                ),
-                "images": [img_b64],
-                "stream": False,
-            },
-            timeout=120,
-        )
-
-        if response.status_code == 200:
-            raw = response.json().get("response", "")
-            # Try to parse JSON from response
-            import re
-            json_match = re.search(r'\{[\s\S]*\}', raw)
-            if json_match:
-                parsed = json.loads(json_match.group())
-                return {
-                    "source": "ollama_qwen_vl",
-                    **parsed,
-                }
-            # Return raw if can't parse
-            return {
-                "source": "ollama_qwen_vl",
-                "analysis": raw,
-            }
-
-    except Exception as e:
-        print(f"⚡ Ollama unavailable, falling back to heavy pipeline: {e}")
-
-    return None
-
-
-# ================== ANALYZE (HYBRID) ==================
+# ================= ANALYZE =================
 
 @app.post("/analyze")
 async def analyze_room_api(file: UploadFile = File(...)):
@@ -140,37 +83,109 @@ async def analyze_room_api(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        # 🔥 FIRST: Try Ollama Qwen-VL (fast, lightweight)
-        ollama_result = analyze_with_ollama(temp_path)
-        if ollama_result:
-            print("⚡ Analyzed via Ollama Qwen-VL")
-            return JSONResponse(content=ollama_result)
-
-        # 🧠 FALLBACK: Heavy pipeline (SAM + YOLO + CLIP + MiDaS)
-        print("🧠 Using heavy ML pipeline...")
-        if not _models_loaded:
-            print("🔥 First request: Loading models...")
-            result = analyze_room(temp_path)
-            _models_loaded = True
-            print("✅ Models cached! Future requests = instant")
-        else:
-            result = analyze_room(temp_path)
-
-        return JSONResponse(content={"source": "heavy_pipeline", **result})
+        result = analyze_room(temp_path)
+        _models_loaded = True
+        return JSONResponse(content=result)
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
 
-# ================== DESIGN ==================
+# ================= COMFYUI FUNCTIONS =================
+
+def generate_with_comfy(local_image_path, prompt_text):
+
+    # Copy image into ComfyUI input folder
+    filename = os.path.basename(local_image_path)
+    comfy_image_path = os.path.join(COMFY_INPUT_DIR, filename)
+    shutil.copy(local_image_path, comfy_image_path)
+
+    with open(WORKFLOW_FILE, "r") as f:
+        workflow = json.load(f)
+
+    # ✅ Correct node IDs from your workflow
+
+    # Load Image node (ID "6")
+    workflow["6"]["inputs"]["image"] = filename
+
+    # Positive prompt node (ID "11")
+    workflow["11"]["inputs"]["text"] = prompt_text
+
+    # Negative prompt node (ID "12")
+    workflow["12"]["inputs"]["text"] = "blurry, distorted furniture, extra walls"
+
+    response = requests.post(
+        f"{COMFY_URL}/prompt",
+        json={"prompt": workflow}
+    )
+
+    if response.status_code != 200:
+        raise Exception("Failed to submit to ComfyUI")
+
+    return response.json()
+
+
+def wait_for_result(prompt_id, timeout=300):
+
+    start = time.time()
+
+    while time.time() - start < timeout:
+
+        r = requests.get(f"{COMFY_URL}/history/{prompt_id}")
+
+        if r.status_code == 200:
+            data = r.json()
+
+            if prompt_id in data:
+                outputs = data[prompt_id]["outputs"]
+
+                for node in outputs.values():
+                    if "images" in node:
+                        return node["images"][0]["filename"]
+
+        time.sleep(2)
+
+    return None
+
+
+# ================= DESIGN GENERATION =================
 
 @app.post("/design/generate/2d/repaint")
 async def generate_repaint(file: UploadFile = File(...), style_prompt: str = Form(...)):
-    return {
-        "image_url": "https://via.placeholder.com/1024x768/1a1f3a/ffffff?text=Redesign+Generated",
-        "prompt_used": style_prompt
-    }
 
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(400, "Upload a valid image")
+
+    temp_path = os.path.join(TEMP_DIR, f"{uuid.uuid4()}_{file.filename}")
+
+    with open(temp_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    try:
+        result = generate_with_comfy(temp_path, style_prompt)
+
+        prompt_id = result.get("prompt_id")
+        if not prompt_id:
+            raise HTTPException(500, "Invalid ComfyUI response")
+
+        filename = wait_for_result(prompt_id)
+
+        if not filename:
+            raise HTTPException(500, "Generation timed out")
+
+        image_url = f"{COMFY_URL}/view?filename={filename}"
+
+        return {
+            "image_url": image_url,
+            "prompt_used": style_prompt
+        }
+
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+# ================= CHAT =================
 
 @app.post("/design/chat")
 async def design_chat(session_id: str = Form(...), message: str = Form(...)):
@@ -181,12 +196,16 @@ async def design_chat(session_id: str = Form(...), message: str = Form(...)):
     }
 
 
+# ================= PROMPT ENHANCER =================
+
 @app.post("/design/enhance_prompt")
 async def enhance_prompt(evaluation_json: str = Form(...), user_style: str = Form(...)):
     eval_data = json.loads(evaluation_json)
     enhanced = f"{user_style} interior, improve {eval_data.get('recommendations', ['lighting'])[0]}"
     return {"enhanced_prompt": enhanced}
 
+
+# ================= RUN =================
 
 if __name__ == "__main__":
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
