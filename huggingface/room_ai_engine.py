@@ -1,34 +1,21 @@
 # ==========================================================
-# 🧠 AI INTERIOR DESIGN MASTER ENGINE (FULL SYSTEM)
+# 🧠 AI INTERIOR DESIGN MASTER ENGINE (LIGHTWEIGHT)
 # ==========================================================
 
 import tensorflow as tf
 import json
 import torch, timm, cv2, numpy as np
-import open_clip  # ✅ Correct CLIP
+import open_clip
 import torch.nn as nn
 from PIL import Image
 from torchvision import transforms
 from ultralytics import YOLO
-from segment_anything import sam_model_registry, SamPredictor
-from transformers import OwlViTProcessor, OwlViTForObjectDetection
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ==========================================================
 # --------------------- LOAD MODELS ------------------------
 # ==========================================================
-
-print("Loading SAM...")
-sam = sam_model_registry["vit_b"](checkpoint="sam_vit_b_01ec64.pth").to(DEVICE)
-sam_predictor = SamPredictor(sam)
-# Set image for SAM predictor (used in detect functions)
-sam_predictor.set_image(np.zeros((1,1,3), dtype=np.uint8))  # Dummy init
-
-
-print("Loading OWL-ViT...")
-owl_processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
-owl_model = OwlViTForObjectDetection.from_pretrained("google/owlvit-base-patch32").to(DEVICE)
 
 print("Loading YOLO...")
 yolo_model = YOLO("yolo26n.pt")
@@ -38,10 +25,6 @@ clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
     'ViT-B-16', pretrained='laion400m_e32'
 )
 clip_model = clip_model.to(DEVICE)
-
-print("Loading MiDaS...")
-midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small").to(DEVICE).eval()
-midas_transform = torch.hub.load("intel-isl/MiDaS", "transforms").small_transform
 
 print("Loading Trait Prediction Model...")
 trait_model = tf.keras.models.load_model("full_style_trait_model_v2.keras")
@@ -65,9 +48,11 @@ STYLE_CLASSES = [
     "modern","rustic","scandinavian","shabby-chic-style","southwestern",
     "traditional","transitional","tropical","victorian"
 ]
+
 # ==========================================================
 # ---------------- Trait Prediction ------------------------ 
 # ==========================================================
+
 def predict_traits(image_pil):
     img = image_pil.resize((224,224))
     arr = np.array(img)/255.0
@@ -76,12 +61,9 @@ def predict_traits(image_pil):
     preds = trait_model.predict(arr, verbose=0)[0]
 
     traits = {}
-
-    # Your model outputs lighting only (3 classes)
     lighting_labels = TRAIT_LABELS["lighting"]
     traits["lighting"] = lighting_labels[int(np.argmax(preds))]
 
-    # Other traits unknown
     for t in TRAIT_LABELS:
         if t != "lighting":
             traits[t] = "unknown"
@@ -99,12 +81,9 @@ def infer_style(traits):
 
         for trait, expected in rules.items():
             val = traits.get(trait, "unknown")
-
             if val == "unknown":
                 continue
-
             known_traits_used += 1
-
             if val == expected:
                 match_count += 1
 
@@ -122,19 +101,13 @@ def infer_style(traits):
     if not style_match_scores:
         return ["no_clear_style"], {}
 
-    # Sort styles by score (highest first)
     sorted_styles = sorted(style_match_scores.items(), key=lambda x: x[1], reverse=True)
-
-    # Take top 3
     top3 = sorted_styles[:3]
-
     possible_styles = [s for s, _ in top3]
     top_scores = {s: sc for s, sc in top3}
 
     return possible_styles, top_scores
 
-
-    
 
 # ---------------- Aesthetic Models ----------------
 
@@ -163,20 +136,13 @@ class RankingModel(nn.Module):
         self.backbone = timm.create_model("vit_small_patch16_224", pretrained=True)
         in_features = self.backbone.head.in_features
         self.backbone.head = nn.Identity()
-
         self.design_mlp = nn.Sequential(
-            nn.Linear(feature_dim,128),
-            nn.ReLU(),
-            nn.Linear(128,64)
+            nn.Linear(feature_dim,128), nn.ReLU(), nn.Linear(128,64)
         )
-
         self.scorer = nn.Sequential(
-            nn.Linear(in_features+64,256),
-            nn.ReLU(),
-            nn.Linear(256,1),
-            nn.Sigmoid()
+            nn.Linear(in_features+64,256), nn.ReLU(),
+            nn.Linear(256,1), nn.Sigmoid()
         )
-
     def forward(self,img,feat):
         return self.scorer(torch.cat([self.backbone(img), self.design_mlp(feat)],dim=1))
 
@@ -195,134 +161,86 @@ tfm = transforms.Compose([
 # ----------------- VISION FUNCTIONS -----------------------
 # ==========================================================
 
-PROMPTS = ["bed","sofa","chair","table","lamp","window","rug","cabinet"]
 MATERIALS = ["wood","fabric","metal","glass","marble","plastic"]
 
 def detect_yolo(image_np):
     results = yolo_model(image_np)[0]
-    objects=[]
+    objects = []
     for box in results.boxes:
-        cls_id=int(box.cls[0])
-        name=yolo_model.names[cls_id]
-        conf=float(box.conf[0])
-        x1,y1,x2,y2=map(int,box.xyxy[0])
-        objects.append({"name":name,"confidence":conf,"bbox":[x1,y1,x2,y2],"source":"yolo"})
-    return objects
-
-def detect_owl(image_pil):
-    inputs=owl_processor(text=PROMPTS,images=image_pil,return_tensors="pt").to(DEVICE)
-    with torch.no_grad(): outputs=owl_model(**inputs)
-    target_sizes=torch.tensor([image_pil.size[::-1]]).to(DEVICE)
-    results=owl_processor.image_processor.post_process_object_detection(
-        outputs=outputs,target_sizes=target_sizes,threshold=0.25)[0]
-    objects=[]
-    for box,score,label in zip(results["boxes"],results["scores"],results["labels"]):
-        x1,y1,x2,y2=box.cpu().numpy().astype(int)
-        objects.append({"name":PROMPTS[label],"confidence":float(score),"bbox":[x1,y1,x2,y2],"source":"owl"})
+        cls_id = int(box.cls[0])
+        name = yolo_model.names[cls_id]
+        conf = float(box.conf[0])
+        x1,y1,x2,y2 = map(int,box.xyxy[0])
+        objects.append({"name":name,"confidence":conf,"bbox":[x1,y1,x2,y2],"source":"YOLO"})
     return objects
 
 def classify_material(crop):
-    img=clip_preprocess(Image.fromarray(crop)).unsqueeze(0).to(DEVICE)
+    img = clip_preprocess(Image.fromarray(crop)).unsqueeze(0).to(DEVICE)
     text = open_clip.tokenize(MATERIALS).to(DEVICE)
     with torch.no_grad():
-        imf=clip_model.encode_image(img); txf=clip_model.encode_text(text)
-        imf/=imf.norm(dim=-1,keepdim=True); txf/=txf.norm(dim=-1,keepdim=True)
-        probs=(imf@txf.T).softmax(dim=-1)
+        imf = clip_model.encode_image(img)
+        txf = clip_model.encode_text(text)
+        imf /= imf.norm(dim=-1,keepdim=True)
+        txf /= txf.norm(dim=-1,keepdim=True)
+        probs = (imf @ txf.T).softmax(dim=-1)
     return MATERIALS[probs.argmax()]
 
-def estimate_depth(img):
-    inp=midas_transform(img).to(DEVICE)
-    with torch.no_grad():
-        depth=midas(inp)
-        depth=torch.nn.functional.interpolate(depth.unsqueeze(1),size=img.shape[:2],
-                                              mode="bicubic",align_corners=False).squeeze().cpu().numpy()
-    depth=(depth-depth.min())/(depth.max()-depth.min())*5
-    return depth
-
 def lighting_analysis(img):
-    gray=cv2.cvtColor(img,cv2.COLOR_RGB2GRAY)
-    b=float(gray.mean())/255
-    return {"brightness":b,"natural_light":b>0.5}
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    b = float(gray.mean()) / 255
+    return {"brightness": b, "natural_light": b > 0.5}
 
 # ==========================================================
 # 🧠 PERCEPTION CORRECTION LAYER
 # ==========================================================
 
-def iou(boxA,boxB):
-    xA,yA=max(boxA[0],boxB[0]),max(boxA[1],boxB[1])
-    xB,yB=min(boxA[2],boxB[2]),min(boxA[3],boxB[3])
-    inter=max(0,xB-xA)*max(0,yB-yA)
-    areaA=(boxA[2]-boxA[0])*(boxA[3]-boxA[1])
-    areaB=(boxB[2]-boxB[0])*(boxB[3]-boxB[1])
-    return inter/(areaA+areaB-inter+1e-6)
-
-def merge_detections(objs,thresh=0.7):
-    final=[]
-    for o in sorted(objs,key=lambda x:x["confidence"],reverse=True):
-        if all(iou(o["bbox"],f["bbox"])<thresh for f in final):
-            final.append(o)
-    return final
-
-DECOR_CLASSES=["clock","vase","frame","plate","wall art"]
+DECOR_CLASSES = ["clock","vase","frame","plate","wall art"]
 
 # ==========================================================
 # ---------------- AESTHETIC ENGINE ------------------------
 # ==========================================================
 
 def analyze_design_pil(image_pil):
-    img=tfm(image_pil).unsqueeze(0).to(DEVICE)
+    img = tfm(image_pil).unsqueeze(0).to(DEVICE)
     with torch.no_grad():
-        feats=feature_model(img).cpu().numpy().flatten()
-        feat_tensor=torch.tensor(feats,dtype=torch.float32).unsqueeze(0).to(DEVICE)
-        score=ranking_model(img,feat_tensor).clamp(0,1).item()
+        feats = feature_model(img).cpu().numpy().flatten()
+        feat_tensor = torch.tensor(feats, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+        score = ranking_model(img, feat_tensor).clamp(0,1).item()
 
-    fd=dict(zip(feature_cols,feats))
+    fd = dict(zip(feature_cols, feats))
 
     # hierarchy perception correction
-    if fd["visual_hierarchy"]<0 and fd["negative_space"]>0.6:
-        fd["visual_hierarchy"]+=0.5
-    # Cohesion correction for accent-wall bedrooms
+    if fd["visual_hierarchy"] < 0 and fd["negative_space"] > 0.6:
+        fd["visual_hierarchy"] += 0.5
     if fd["design_cohesion"] < 0.2 and fd["color_harmony"] > 0.6:
         fd["design_cohesion"] += 0.35
-    # Minimalist texture scenes shouldn't be penalized
     if fd["texture_depth"] < 0.3 and fd["visual_comfort"] > 0.8:
         fd["texture_depth"] += 0.25
-    # Symmetry compensation
     if fd["spatial_balance"] < 0 and fd["alignment_order"] > 0.4:
         fd["spatial_balance"] += 0.4
 
+    tips = []
+    if fd['lighting_quality'] < 0.2: tips.append("Improve layered lighting.")
+    if fd['texture_depth'] < 0.2: tips.append("Add more texture layers.")
+    if fd['clutter_control'] < 0.2: tips.append("Declutter surfaces.")
 
-    tips=[]
-    if fd['lighting_quality']<0.2: tips.append("Improve layered lighting.")
-    if fd['texture_depth']<0.2: tips.append("Add more texture layers.")
-    if fd['clutter_control']<0.2: tips.append("Declutter surfaces.")
-    # Global flag injected from analyze_room via closure or return
-    try:
-        if metric and fd["clutter_control"] < 0:
-            fd["clutter_control"] += 0.6
-    except:
-        pass
-
-    return score,tips,fd
+    return score, tips, fd
 
 # ==========================================================
 # ---------------- MASTER ANALYSIS -------------------------
 # ==========================================================
 
 def analyze_room(image_path):
-    image_pil=Image.open(image_path).convert("RGB")
-    img_np=np.array(image_pil)
-    
+    image_pil = Image.open(image_path).convert("RGB")
+    img_np = np.array(image_pil)
 
-    objects=merge_detections(detect_yolo(img_np)+detect_owl(image_pil))
-    depth=estimate_depth(img_np)
+    # Object detection (YOLO only)
+    objects = detect_yolo(img_np)
 
     h, w = img_np.shape[:2]
 
     for o in objects:
         x1, y1, x2, y2 = map(int, o["bbox"])
-
-        # Clamp box to image bounds
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(w - 1, x2), min(h - 1, y2)
 
@@ -334,19 +252,18 @@ def analyze_room(image_path):
             continue
 
         o["material"] = classify_material(crop)
-        o["distance_m"] = float(depth[y1:y2, x1:x2].mean())
+        o["distance_m"] = 0.0  # No depth estimation without MiDaS
 
+    # Remove decor clutter (simplified without depth)
+    objects = [o for o in objects if o["name"] not in DECOR_CLASSES]
 
-    # remove decor clutter
-    objects=[o for o in objects if not (o["name"] in DECOR_CLASSES and o["distance_m"]>1.5)]
+    lighting = lighting_analysis(img_np)
+    aesthetic_score, design_tips, metrics = analyze_design_pil(image_pil)
 
-    lighting=lighting_analysis(img_np)
-    aesthetic_score,design_tips,metrics=analyze_design_pil(image_pil)
     # ---- BASE TRAITS FROM MODEL (lighting only) ----
     traits = predict_traits(image_pil)
 
     # ---- DERIVE TRAITS FROM DESIGN METRICS ----
-    # Density & Openness
     if metrics["negative_space"] > 0.75:
         traits["density"] = "minimal"
         traits["openness"] = "open"
@@ -357,7 +274,6 @@ def analyze_room(image_path):
         traits["density"] = "busy"
         traits["openness"] = "compact"
 
-    # Contrast
     if metrics["contrast_balance"] < 0.4:
         traits["contrast"] = "low"
     elif metrics["contrast_balance"] > 0.65:
@@ -365,7 +281,6 @@ def analyze_room(image_path):
     else:
         traits["contrast"] = "medium"
 
-    # Texture
     if metrics["texture_depth"] > 0.6:
         traits["texture"] = "mixed"
     elif metrics["texture_depth"] < 0.3:
@@ -373,7 +288,6 @@ def analyze_room(image_path):
     else:
         traits["texture"] = "hard"
 
-    # Palette from color harmony
     if metrics["color_harmony"] > 0.7:
         traits["palette"] = "bright"
     elif metrics["color_harmony"] > 0.4:
@@ -381,12 +295,10 @@ def analyze_room(image_path):
     else:
         traits["palette"] = "dark"
 
-    # Material from detected objects
     materials = [o["material"] for o in objects if "material" in o]
     if materials:
         traits["material"] = max(set(materials), key=materials.count)
 
-    # Geometry approximation
     if metrics["alignment_order"] > 0.6:
         traits["geometry"] = "straight"
     elif metrics["alignment_order"] > 0.3:
@@ -394,24 +306,20 @@ def analyze_room(image_path):
     else:
         traits["geometry"] = "curved"
 
-    # ---- NOW FIND STYLE ----
     possible_styles, style_scores = infer_style(traits)
-    depth_small = cv2.resize(depth, (160, 120))
-
-    
 
     result = {
-    "objects": objects,
-    "lighting": lighting,
-    "aesthetic_score": round(aesthetic_score, 2),
-    "design_metrics": metrics,
-    "recommendations": design_tips,
-    "depth_map": depth_small,
+        "objects": objects,
+        "lighting": lighting,
+        "aesthetic_score": round(aesthetic_score, 2),
+        "design_metrics": metrics,
+        "recommendations": design_tips,
+        "depth_map": [],  # No MiDaS — empty
 
-    "style_traits": traits,
-    "possible_styles": possible_styles,
-    "style_match_scores": style_scores
-}
+        "style_traits": traits,
+        "possible_styles": possible_styles,
+        "style_match_scores": style_scores
+    }
 
     return to_python_types(result)
 
@@ -420,17 +328,17 @@ def analyze_room(image_path):
 # ==========================================================
 
 def to_python_types(obj):
-    if isinstance(obj,(np.integer,)): return int(obj)
-    if isinstance(obj,(np.floating,)): return float(obj)
-    if isinstance(obj,np.ndarray): return obj.tolist()
-    if isinstance(obj,torch.Tensor): return obj.detach().cpu().tolist()
-    if isinstance(obj,dict): return {k:to_python_types(v) for k,v in obj.items()}
-    if isinstance(obj,list): return [to_python_types(v) for v in obj]
+    if isinstance(obj, (np.integer,)): return int(obj)
+    if isinstance(obj, (np.floating,)): return float(obj)
+    if isinstance(obj, np.ndarray): return obj.tolist()
+    if isinstance(obj, torch.Tensor): return obj.detach().cpu().tolist()
+    if isinstance(obj, dict): return {k: to_python_types(v) for k, v in obj.items()}
+    if isinstance(obj, list): return [to_python_types(v) for v in obj]
     return obj
 
 # ==========================================================
 # ---------------- RUN EXAMPLE -------------------------
 # ==========================================================
 
-if __name__=="__main__":
+if __name__ == "__main__":
     print(analyze_room("room.jpg"))

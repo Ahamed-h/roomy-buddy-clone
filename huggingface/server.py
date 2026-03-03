@@ -3,7 +3,6 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn, shutil, os, uuid
-import torch
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 import json
@@ -14,7 +13,7 @@ load_dotenv()
 
 from room_ai_engine import analyze_room
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cpu"
 TEMP_DIR = "temp_uploads"
 
 COMFY_URL = "http://127.0.0.1:8188"
