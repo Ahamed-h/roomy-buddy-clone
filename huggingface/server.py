@@ -27,6 +27,10 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
 _models_loaded = False
+LAST_ANALYSIS = None
+LAST_IMAGE_PATH = None
+
+OLLAMA_URL = "http://localhost:11434"
 
 
 # ================= LIFESPAN =================
@@ -85,9 +89,15 @@ async def analyze_room_api(file: UploadFile = File(...)):
     try:
         result = analyze_room(temp_path)
         _models_loaded = True
+
+        global LAST_ANALYSIS, LAST_IMAGE_PATH
+        LAST_ANALYSIS = result
+        LAST_IMAGE_PATH = temp_path  # keep for chat-triggered generation
+
         return JSONResponse(content=result)
     finally:
-        if os.path.exists(temp_path):
+        # Don't remove if stored as last image
+        if os.path.exists(temp_path) and temp_path != LAST_IMAGE_PATH:
             os.remove(temp_path)
 
 
@@ -185,15 +195,102 @@ async def generate_repaint(file: UploadFile = File(...), style_prompt: str = For
             os.remove(temp_path)
 
 
-# ================= CHAT =================
+# ================= INTELLIGENT CHAT =================
+
+def chat_with_ollama(prompt):
+    """Send prompt to TinyLlama via Ollama and return raw text."""
+    response = requests.post(
+        f"{OLLAMA_URL}/api/generate",
+        json={"model": "tinyllama", "prompt": prompt, "stream": False},
+        timeout=60
+    )
+    if response.status_code != 200:
+        raise Exception(f"Ollama error: {response.status_code}")
+    return response.json()["response"]
+
+
+def intelligent_chat(message, analysis_result=None):
+    """Chat with structured JSON output + analysis context."""
+
+    system_prompt = """You are an interior design AI assistant.
+
+You MUST return valid JSON in this format:
+
+{
+  "reply": "text response to user",
+  "action": "none OR generate",
+  "style_prompt": "prompt to send to image generator if action is generate"
+}
+
+Rules:
+- If user asks for redesign/makeover/restyle, set action to "generate"
+- Otherwise set action to "none"
+- style_prompt must be optimized for Stable Diffusion
+- Always return valid JSON only, no extra text
+"""
+
+    context = ""
+    if analysis_result:
+        context = f"\nRoom Analysis:\n{json.dumps(analysis_result)}\n"
+
+    full_prompt = f"{system_prompt}\n{context}\nUser: {message}\nAssistant:"
+
+    raw_output = chat_with_ollama(full_prompt)
+
+    # Parse JSON safely
+    try:
+        parsed = json.loads(raw_output)
+    except Exception:
+        # Try to extract JSON from mixed output
+        import re
+        match = re.search(r'\{.*\}', raw_output, re.DOTALL)
+        if match:
+            try:
+                parsed = json.loads(match.group())
+            except Exception:
+                parsed = {"reply": raw_output, "action": "none", "style_prompt": ""}
+        else:
+            parsed = {"reply": raw_output, "action": "none", "style_prompt": ""}
+
+    return parsed
+
 
 @app.post("/design/chat")
-async def design_chat(session_id: str = Form(...), message: str = Form(...)):
-    return {
-        "response": f"Chat response to: '{message}' (session: {session_id})",
-        "action": "generate",
-        "params": {"style": "modern"}
-    }
+async def design_chat(
+    session_id: str = Form(...),
+    message: str = Form(...),
+    include_analysis: bool = Form(False)
+):
+    global LAST_ANALYSIS, LAST_IMAGE_PATH
+
+    analysis_data = LAST_ANALYSIS if include_analysis else None
+
+    try:
+        decision = intelligent_chat(message, analysis_data)
+    except Exception as e:
+        # Fallback if Ollama is not running
+        return {
+            "response": f"Chat offline — Ollama not reachable. Error: {str(e)}",
+            "action": "none",
+            "style_prompt": ""
+        }
+
+    # Auto-trigger ComfyUI generation
+    if decision.get("action") == "generate" and decision.get("style_prompt") and LAST_IMAGE_PATH:
+        try:
+            comfy_result = generate_with_comfy(LAST_IMAGE_PATH, decision["style_prompt"])
+            prompt_id = comfy_result.get("prompt_id")
+
+            if prompt_id:
+                filename = wait_for_result(prompt_id)
+                if filename:
+                    decision["image_url"] = f"{COMFY_URL}/view?filename={filename}"
+        except Exception as e:
+            decision["generation_error"] = str(e)
+
+    # Normalize output key
+    decision["response"] = decision.pop("reply", decision.get("response", ""))
+    return decision
 
 
 # ================= PROMPT ENHANCER =================
