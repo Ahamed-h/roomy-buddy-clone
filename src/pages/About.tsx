@@ -40,16 +40,6 @@ const capabilities = [
     title: "Floor Plan Analysis",
     desc: "Upload a 2D floor plan → AI detects rooms, walls, doors, and windows. Get optimization suggestions, add your own ideas, and generate a redesigned floor plan.",
   },
-  {
-    icon: Paintbrush,
-    title: "3D Design Studio",
-    desc: "Dark-themed 3D editor with furniture placement, real-time manipulation, photorealistic rendering, and an AI chat assistant that sees your space.",
-  },
-  {
-    icon: Camera,
-    title: "Furniture from Photos",
-    desc: "Take a photo of any real furniture piece. AI converts it to a to-scale 3D model you can place directly in your room design.",
-  },
 ];
 
 const About = () => {
