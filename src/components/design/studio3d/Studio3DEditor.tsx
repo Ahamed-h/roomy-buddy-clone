@@ -5,7 +5,6 @@ import {
   Box,
   Layers,
   Upload,
-  Trash2,
   Plus,
   Eye,
   Loader2,
@@ -15,15 +14,75 @@ import {
   RotateCcw,
   Download,
 } from "lucide-react";
-import FloorplanEditor from "./FloorplanEditor";
 import SceneViewer3D, { type SceneViewer3DHandle } from "./SceneViewer3D";
-import MidasReconstruction from "./MidasReconstruction";
+import FloorplanAnalyzer from "./FloorplanAnalyzer";
 import { MOCK_WALLS, MOCK_FURNITURE_ITEMS, getSampleData, FURNITURE_LIBRARY } from "./mockData";
-import type { Wall, Furniture } from "./types";
+import type { Wall, Furniture, FloorplanAnalysis } from "./types";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { isOllamaAvailable, ollamaVision } from "@/services/ollama";
 import { directVision, hasDirectKeys } from "@/services/directAI";
+
+const ROOM_ANALYSIS_PROMPT = `You are a senior architectural space planner. Analyse the uploaded floor plan image carefully.
+
+Return ONLY a single valid JSON object — no markdown, no explanation, nothing else.
+
+Schema:
+{
+  "rooms": [
+    {
+      "id": "r1",
+      "type": "Living Room",
+      "label": "Living Room",
+      "estimatedSqFt": 220,
+      "x": 5,
+      "y": 8,
+      "width": 30,
+      "height": 25,
+      "notes": "Open plan, south-facing"
+    }
+  ],
+  "totalArea": 1400,
+  "score": 7.2,
+  "summary": "Compact 2BR apartment with efficient layout",
+  "insights": [
+    { "type": "positive", "text": "Good separation of wet and dry zones" },
+    { "type": "warning",  "text": "Bedroom 2 has no direct natural light" },
+    { "type": "negative", "text": "Kitchen triangle inefficient" }
+  ],
+  "flowIssues": ["Living room acts as through-corridor to bedrooms"],
+  "recommendations": [
+    {
+      "id": "rec1",
+      "title": "Enlarge Kitchen",
+      "description": "Extend kitchen 4 ft east, removing awkward pantry nook",
+      "impact": "high",
+      "roomChanges": [
+        { "id": "r2", "width": 22, "height": 18, "notes": "Expanded kitchen with island" }
+      ]
+    }
+  ]
+}
+
+Rules:
+- x, y, width, height are PERCENTAGES (0–100) of the image dimensions
+- Only identify rooms clearly delimited by walls, labels or boundaries in the image
+- Do NOT invent rooms that are not visible
+- Every recommendation roomChange must reference a real room id from the rooms array
+- score is 0–10 based on: flow efficiency, natural light, privacy zoning, storage, space utilisation
+- impact must be "high", "medium", or "low"
+- type must be one of: Living Room, Bedroom, Kitchen, Bathroom, Dining Room, Office, Hallway, Garage, Laundry, Storage, Balcony, Unknown`;
+
+function parseAnalysisJSON(raw: string): FloorplanAnalysis {
+  let jsonStr = raw;
+  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) jsonStr = fenceMatch[1].trim();
+  if (!jsonStr.startsWith("{")) {
+    const braceMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (braceMatch) jsonStr = braceMatch[0];
+  }
+  return JSON.parse(jsonStr);
+}
 
 const Studio3DEditor = () => {
   const { toast } = useToast();
@@ -33,19 +92,9 @@ const Studio3DEditor = () => {
   const [view, setView] = useState<"2d" | "3d">("2d");
   const [walls, setWalls] = useState<Wall[]>(MOCK_WALLS);
   const [furniture, setFurniture] = useState<Furniture[]>(MOCK_FURNITURE_ITEMS);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
-  const [sceneDimensions, setSceneDimensions] = useState<{ width: number; height: number } | null>(null);
-
-  const loadSample = () => {
-    const data = getSampleData();
-    setWalls(data.walls);
-    setFurniture(data.furniture);
-    setSelectedId(null);
-    toast({ title: "Sample Loaded", description: "Loaded sample floorplan with furniture." });
-  };
+  const [analysis, setAnalysis] = useState<FloorplanAnalysis | null>(null);
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -60,99 +109,76 @@ const Studio3DEditor = () => {
       const file = acceptedFiles[0];
       if (!file) return;
       setIsProcessing(true);
+      setAnalysis(null);
       try {
         const imageBase64 = await fileToBase64(file);
         setUploadedImageUrl(imageBase64);
 
-        let data: any = null;
+        let result: FloorplanAnalysis | null = null;
 
-        // Try Ollama (local Qwen2.5-VL) first
+        // Try Ollama first
         const ollamaOnline = await isOllamaAvailable();
         if (ollamaOnline) {
           try {
             toast({ title: "Analyzing with local AI (Qwen2.5-VL)..." });
-            const prompt = `Analyze this floor plan image. Extract all walls, doors, windows, furniture, and rooms with precise coordinates. Return ONLY valid JSON with this schema: { "unit": "feet"|"meters", "dimensions": {"width": number, "height": number}, "walls": [{"start":{"x":number,"y":number},"end":{"x":number,"y":number},"thickness":number}], "doors": [{"position":{"x":number,"y":number},"width":number,"rotation":number,"type":"single"|"double"|"sliding"}], "windows": [{"start":{"x":number,"y":number},"end":{"x":number,"y":number},"width":number}], "furniture": [{"type":"string","label":"string","position":{"x":number,"y":number},"rotation":number,"width":number,"depth":number,"height":number}], "rooms": [{"name":"string","center":{"x":number,"y":number}}] }`;
-            const raw = await ollamaVision(prompt, imageBase64);
-            let jsonStr = raw;
-            const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-            if (jsonMatch) jsonStr = jsonMatch[1].trim();
-            if (!jsonStr.startsWith("{")) {
-              const braceMatch = jsonStr.match(/\{[\s\S]*\}/);
-              if (braceMatch) jsonStr = braceMatch[0];
-            }
-            const parsed = JSON.parse(jsonStr);
-            // Convert to meters
-            const unit = parsed.unit || "meters";
-            const toM = unit === "feet" ? 0.3048 : 1;
-            data = {
-              walls: (parsed.walls || []).map((w: any, i: number) => ({ id: `w-ai-${i}`, start: { x: (w.start?.x||0)*toM, y: (w.start?.y||0)*toM }, end: { x: (w.end?.x||0)*toM, y: (w.end?.y||0)*toM }, thickness: (w.thickness||(unit==="feet"?0.5:0.15))*toM })),
-              furniture: [
-                ...(parsed.furniture||[]).map((f:any,i:number)=>({id:`f-ai-${i}`,type:f.type||"table",label:f.label||f.type||"Item",position:{x:(f.position?.x||0)*toM,y:(f.position?.y||0)*toM},rotation:f.rotation||0,width:(f.width||1)*toM,depth:(f.depth||1)*toM,height:(f.height||1)*toM})),
-                ...(parsed.doors||[]).map((d:any,i:number)=>({id:`d-ai-${i}`,type:"door",label:`Door (${d.type||"single"})`,position:{x:(d.position?.x||0)*toM,y:(d.position?.y||0)*toM},rotation:d.rotation||0,width:(d.width||(unit==="feet"?3:0.9))*toM,depth:0.1,height:2.1})),
-                ...(parsed.windows||[]).map((w:any,i:number)=>{const sx=(w.start?.x||0)*toM,sy=(w.start?.y||0)*toM,ex=(w.end?.x||0)*toM,ey=(w.end?.y||0)*toM;return{id:`win-ai-${i}`,type:"window",label:"Window",position:{x:(sx+ex)/2,y:(sy+ey)/2},rotation:0,width:w.width?w.width*toM:Math.sqrt((ex-sx)**2+(ey-sy)**2),depth:0.15,height:1.2}}),
-              ],
-              rooms: (parsed.rooms||[]).map((r:any,i:number)=>({id:`r-ai-${i}`,name:r.name,center:{x:(r.center?.x||0)*toM,y:(r.center?.y||0)*toM}})),
-              dimensions: { width: (parsed.dimensions?.width||10)*toM, height: (parsed.dimensions?.height||10)*toM },
-            };
+            const raw = await ollamaVision(ROOM_ANALYSIS_PROMPT, imageBase64);
+            result = parseAnalysisJSON(raw);
           } catch (err) {
-            console.warn("Ollama floorplan analysis failed, falling back to cloud:", err);
+            console.warn("Ollama analysis failed:", err);
           }
         }
 
-        // Try direct API (Gemini/OpenAI)
-        if (!data && hasDirectKeys()) {
+        // Try direct API
+        if (!result && hasDirectKeys()) {
           try {
             toast({ title: "Analyzing with direct API..." });
-            const prompt = `Analyze this floor plan image. Extract all walls, doors, windows, furniture, and rooms with precise coordinates. Return ONLY valid JSON with this schema: { "unit": "feet"|"meters", "dimensions": {"width": number, "height": number}, "walls": [{"start":{"x":number,"y":number},"end":{"x":number,"y":number},"thickness":number}], "doors": [{"position":{"x":number,"y":number},"width":number,"rotation":number,"type":"single"|"double"|"sliding"}], "windows": [{"start":{"x":number,"y":number},"end":{"x":number,"y":number},"width":number}], "furniture": [{"type":"string","label":"string","position":{"x":number,"y":number},"rotation":number,"width":number,"depth":number,"height":number}], "rooms": [{"name":"string","center":{"x":number,"y":number}}] }`;
-            const raw = await directVision(prompt, imageBase64);
-            let jsonStr = raw;
-            const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-            if (jsonMatch) jsonStr = jsonMatch[1].trim();
-            if (!jsonStr.startsWith("{")) {
-              const braceMatch = jsonStr.match(/\{[\s\S]*\}/);
-              if (braceMatch) jsonStr = braceMatch[0];
-            }
-            const parsed = JSON.parse(jsonStr);
-            const unit = parsed.unit || "meters";
-            const toM = unit === "feet" ? 0.3048 : 1;
-            data = {
-              walls: (parsed.walls || []).map((w: any, i: number) => ({ id: `w-ai-${i}`, start: { x: (w.start?.x||0)*toM, y: (w.start?.y||0)*toM }, end: { x: (w.end?.x||0)*toM, y: (w.end?.y||0)*toM }, thickness: (w.thickness||(unit==="feet"?0.5:0.15))*toM })),
-              furniture: [
-                ...(parsed.furniture||[]).map((f:any,i:number)=>({id:`f-ai-${i}`,type:f.type||"table",label:f.label||f.type||"Item",position:{x:(f.position?.x||0)*toM,y:(f.position?.y||0)*toM},rotation:f.rotation||0,width:(f.width||1)*toM,depth:(f.depth||1)*toM,height:(f.height||1)*toM})),
-                ...(parsed.doors||[]).map((d:any,i:number)=>({id:`d-ai-${i}`,type:"door",label:`Door (${d.type||"single"})`,position:{x:(d.position?.x||0)*toM,y:(d.position?.y||0)*toM},rotation:d.rotation||0,width:(d.width||(unit==="feet"?3:0.9))*toM,depth:0.1,height:2.1})),
-                ...(parsed.windows||[]).map((w:any,i:number)=>{const sx=(w.start?.x||0)*toM,sy=(w.start?.y||0)*toM,ex=(w.end?.x||0)*toM,ey=(w.end?.y||0)*toM;return{id:`win-ai-${i}`,type:"window",label:"Window",position:{x:(sx+ex)/2,y:(sy+ey)/2},rotation:0,width:w.width?w.width*toM:Math.sqrt((ex-sx)**2+(ey-sy)**2),depth:0.15,height:1.2}}),
-              ],
-              rooms: (parsed.rooms||[]).map((r:any,i:number)=>({id:`r-ai-${i}`,name:r.name,center:{x:(r.center?.x||0)*toM,y:(r.center?.y||0)*toM}})),
-              dimensions: { width: (parsed.dimensions?.width||10)*toM, height: (parsed.dimensions?.height||10)*toM },
-            };
+            const raw = await directVision(ROOM_ANALYSIS_PROMPT, imageBase64);
+            result = parseAnalysisJSON(raw);
           } catch (err) {
-            console.warn("Direct API floorplan analysis failed, falling back to Supabase:", err);
+            console.warn("Direct API analysis failed:", err);
           }
         }
 
         // Fallback to edge function
-        if (!data) {
+        if (!result) {
+          toast({ title: "Analyzing with cloud AI..." });
           const { data: edgeData, error } = await supabase.functions.invoke("analyze-floorplan", {
-            body: { imageBase64 },
+            body: { imageBase64, mode: "rooms" },
           });
           if (error) throw error;
           if (edgeData?.error) throw new Error(edgeData.error);
-          data = edgeData;
+          // The edge function may return room-format or wall-format data
+          if (edgeData?.rooms) {
+            result = edgeData as FloorplanAnalysis;
+          } else {
+            // Convert wall-format to basic room format
+            result = {
+              rooms: [],
+              totalArea: 0,
+              score: 0,
+              summary: "Analysis returned wall data. Room detection not available with this provider.",
+              insights: [],
+              flowIssues: [],
+              recommendations: [],
+            };
+            // Still load walls/furniture for 3D view
+            if (edgeData?.walls) setWalls(edgeData.walls);
+            if (edgeData?.furniture) setFurniture(edgeData.furniture);
+          }
         }
 
-        setWalls(data.walls || []);
-        setFurniture(data.furniture || []);
-        if (data.dimensions) setSceneDimensions(data.dimensions);
-        setSelectedId(null);
-        toast({ title: "AI Analysis Complete", description: `Detected ${data.walls?.length || 0} walls and ${data.furniture?.length || 0} furniture items.` });
+        if (result) {
+          setAnalysis(result);
+          toast({
+            title: "AI Analysis Complete",
+            description: `Detected ${result.rooms?.length || 0} rooms. Score: ${result.score?.toFixed(1) || "N/A"}/10`,
+          });
+        }
       } catch (err: any) {
         console.error("Floorplan analysis failed:", err);
-        const sample = getSampleData();
-        setWalls(sample.walls);
-        setFurniture(sample.furniture);
         toast({
-          title: "AI Analysis Failed",
-          description: "Loaded sample data as fallback. " + (err?.message || ""),
+          title: "Analysis Failed",
+          description: err?.message || "Unknown error",
           variant: "destructive",
         });
       } finally {
@@ -168,55 +194,12 @@ const Studio3DEditor = () => {
     multiple: false,
   });
 
-  const addWall = () => {
-    const newWall: Wall = {
-      id: `w-${Date.now()}`,
-      start: { x: 2, y: 2 },
-      end: { x: 5, y: 2 },
-      thickness: 0.15,
-    };
-    setWalls([...walls, newWall]);
-    setSelectedId(newWall.id);
-  };
-
-  const addFurnitureItem = (lib: typeof FURNITURE_LIBRARY[0]) => {
-    const newItem: Furniture = {
-      id: `f-${Date.now()}`,
-      type: lib.type,
-      label: lib.name,
-      position: { x: 5, y: 5 },
-      rotation: 0,
-      width: lib.w,
-      depth: lib.d,
-      height: lib.h,
-    };
-    setFurniture([...furniture, newItem]);
-    setSelectedId(newItem.id);
-  };
-
-  const deleteSelected = () => {
-    if (!selectedId) return;
-    setWalls(walls.filter((w) => w.id !== selectedId));
-    setFurniture(furniture.filter((f) => f.id !== selectedId));
-    setSelectedId(null);
-  };
-
   const handleReset = () => {
     setWalls([]);
     setFurniture([]);
-    setSelectedId(null);
+    setAnalysis(null);
+    setUploadedImageUrl(null);
     toast({ title: "Scene Cleared" });
-  };
-
-  const selectedFurniture = furniture.find((f) => f.id === selectedId);
-  const selectedWall = walls.find((w) => w.id === selectedId);
-
-  const updateSelectedFurniture = (updates: Partial<Furniture>) => {
-    setFurniture(furniture.map((f) => (f.id === selectedId ? { ...f, ...updates } : f)));
-  };
-
-  const updateSelectedWall = (updates: Partial<Wall>) => {
-    setWalls(walls.map((w) => (w.id === selectedId ? { ...w, ...updates } : w)));
   };
 
   return (
@@ -229,185 +212,70 @@ const Studio3DEditor = () => {
         minHeight: 600,
       }}
     >
-      {/* Sidebar */}
-      <motion.aside
-        initial={false}
-        animate={{ width: sidebarOpen ? 300 : 0 }}
-        className="relative flex flex-col border-r border-white/10 bg-[#0d1225]/80 backdrop-blur-xl overflow-hidden shrink-0"
-      >
-        <div className={`flex flex-col h-full p-5 space-y-6 overflow-y-auto ${!sidebarOpen ? "hidden" : ""}`}>
-          {/* Logo */}
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-[#4a90e2] rounded-lg">
-              <Box className="w-5 h-5 text-white" />
+      {/* Main Content */}
+      <main className="relative flex-1 flex flex-col overflow-hidden">
+        {/* Header bar */}
+        <header className="flex items-center justify-between px-4 py-2 border-b border-white/10 bg-[#0d1225]/80 backdrop-blur-xl z-40 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 bg-[#4a90e2] rounded-lg">
+              <Box className="w-4 h-4 text-white" />
             </div>
-            <h2 className="text-base font-bold text-white tracking-tight">ArchAI Studio</h2>
+            <h2 className="text-sm font-bold text-white tracking-tight">ArchAI Studio</h2>
           </div>
 
-          {/* Upload Section */}
-          <div className="space-y-2">
-            <div
-              {...getRootProps()}
-              className={`relative group cursor-pointer rounded-xl border-2 border-dashed p-6 transition-all ${
-                isDragActive
-                  ? "border-[#4a90e2] bg-[#4a90e2]/10"
-                  : "border-white/10 hover:border-white/20 hover:bg-white/5"
+          {/* 2D / 3D Toggle */}
+          <div className="flex items-center p-0.5 bg-white/5 rounded-full">
+            <button
+              onClick={() => setView("2d")}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+                view === "2d" ? "bg-[#4a90e2] text-white shadow-lg" : "text-white/40 hover:text-white/60"
               }`}
             >
-              <input {...getInputProps()} />
-              <div className="flex flex-col items-center text-center space-y-2">
-                <div className="p-2.5 rounded-full bg-white/5 group-hover:bg-white/10 transition-colors">
-                  <Upload className="w-5 h-5 text-white/40" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-white/70">Upload Floorplan</p>
-                  <p className="text-[10px] text-white/30 mt-0.5">Drag & drop or click to scan</p>
-                </div>
-              </div>
-              {isProcessing && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d1225]/90 rounded-xl backdrop-blur-sm">
-                  <Loader2 className="w-6 h-6 text-[#4a90e2] animate-spin mb-1" />
-                  <p className="text-[10px] font-medium text-white/60">AI Analyzing...</p>
-                </div>
-              )}
-            </div>
-
+              <ScanEye className="w-3.5 h-3.5" />
+              <span>Analyzer</span>
+            </button>
             <button
-              onClick={loadSample}
-              className="w-full py-2 px-3 rounded-lg bg-white/5 border border-white/10 text-xs font-medium text-white/60 hover:bg-white/10 hover:text-white/80 transition-colors"
+              onClick={() => setView("3d")}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+                view === "3d" ? "bg-[#4a90e2] text-white shadow-lg" : "text-white/40 hover:text-white/60"
+              }`}
             >
-              Load Sample Data
+              <Eye className="w-3.5 h-3.5" />
+              <span>3D View</span>
             </button>
           </div>
 
-          {/* Furniture Library */}
-          <div className="space-y-3">
-            <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wider">Furniture Library</p>
-            <div className="grid grid-cols-2 gap-1.5">
+          {/* Upload & Reset */}
+          <div className="flex items-center gap-2">
+            <div {...getRootProps()} className="cursor-pointer">
+              <input {...getInputProps()} />
               <button
-                onClick={addWall}
-                className="flex items-center space-x-1.5 p-2.5 rounded-lg bg-[#4a90e2]/10 border border-[#4a90e2]/20 hover:bg-[#4a90e2]/20 transition-all text-xs text-[#4a90e2]"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                  isDragActive
+                    ? "border-[#4a90e2] bg-[#4a90e2]/20 text-[#4a90e2]"
+                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                }`}
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Wall</span>
+                {isProcessing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Upload className="w-3.5 h-3.5" />
+                )}
+                <span>{isProcessing ? "Analyzing..." : "Upload Plan"}</span>
               </button>
-              {FURNITURE_LIBRARY.map((lib) => (
-                <button
-                  key={lib.type}
-                  onClick={() => addFurnitureItem(lib)}
-                  className="flex items-center space-x-1.5 p-2.5 rounded-lg bg-white/5 border border-white/5 hover:border-white/10 hover:bg-white/10 transition-all text-xs text-white/60"
-                >
-                  <Box className="w-3.5 h-3.5 text-white/30" />
-                  <span>{lib.name}</span>
-                </button>
-              ))}
             </div>
+            <button
+              onClick={handleReset}
+              className="p-1.5 rounded-lg border border-white/10 bg-white/5 text-white/40 hover:text-red-400 hover:border-red-400/30 transition-all"
+              title="Clear All"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
           </div>
-
-          {/* Properties Panel */}
-          {(selectedFurniture || selectedWall) && (
-            <div className="space-y-3">
-              <p className="text-[10px] font-semibold text-white/30 uppercase tracking-wider">Properties</p>
-              <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
-                {selectedFurniture && (
-                  <>
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-white/30">Label</label>
-                      <input
-                        type="text"
-                        value={selectedFurniture.label}
-                        onChange={(e) => updateSelectedFurniture({ label: e.target.value })}
-                        className="w-full bg-[#0d1225] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white/80 focus:outline-none focus:border-[#4a90e2]"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { label: "Width (m)", key: "width", val: selectedFurniture.width },
-                        { label: "Depth (m)", key: "depth", val: selectedFurniture.depth },
-                        { label: "Height (m)", key: "height", val: selectedFurniture.height },
-                        { label: "Rotation (°)", key: "rotation", val: selectedFurniture.rotation },
-                      ].map((field) => (
-                        <div key={field.key} className="space-y-1">
-                          <label className="text-[10px] text-white/30">{field.label}</label>
-                          <input
-                            type="number"
-                            step={field.key === "rotation" ? "1" : "0.1"}
-                            value={field.val}
-                            onChange={(e) =>
-                              updateSelectedFurniture({ [field.key]: parseFloat(e.target.value) })
-                            }
-                            className="w-full bg-[#0d1225] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white/80 focus:outline-none focus:border-[#4a90e2]"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-                {selectedWall && (
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-white/30">Thickness (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      value={selectedWall.thickness}
-                      onChange={(e) =>
-                        updateSelectedWall({ thickness: parseFloat(e.target.value) })
-                      }
-                      className="w-full bg-[#0d1225] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white/80 focus:outline-none focus:border-[#4a90e2]"
-                    />
-                  </div>
-                )}
-                <button
-                  onClick={deleteSelected}
-                  className="w-full flex items-center justify-center space-x-1.5 p-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all text-xs"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Remove Item</span>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Sidebar Toggle */}
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute -right-4 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center bg-[#1e1e2e] border border-white/10 rounded-full text-white/40 hover:text-white transition-colors z-50"
-        >
-          {sidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-        </button>
-      </motion.aside>
-
-      {/* Main Content */}
-      <main className="relative flex-1 flex flex-col overflow-hidden">
-        {/* 2D / 3D Toggle */}
-        <header className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex items-center p-1 bg-[#0d1225]/80 backdrop-blur-xl border border-white/10 rounded-full shadow-2xl">
-          <button
-            onClick={() => setView("2d")}
-            className={`flex items-center space-x-1.5 px-5 py-1.5 rounded-full text-xs font-medium transition-all ${
-              view === "2d"
-                ? "bg-[#4a90e2] text-white shadow-lg"
-                : "text-white/40 hover:text-white/60"
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>2D Editor</span>
-          </button>
-          <button
-            onClick={() => setView("3d")}
-            className={`flex items-center space-x-1.5 px-5 py-1.5 rounded-full text-xs font-medium transition-all ${
-              view === "3d"
-                ? "bg-[#4a90e2] text-white shadow-lg"
-                : "text-white/40 hover:text-white/60"
-            }`}
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>3D View</span>
-          </button>
         </header>
 
         {/* Canvas Area */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative overflow-hidden">
           <AnimatePresence mode="wait">
             {view === "2d" ? (
               <motion.div
@@ -417,16 +285,33 @@ const Studio3DEditor = () => {
                 exit={{ opacity: 0 }}
                 className="w-full h-full"
               >
-                <FloorplanEditor
-                  walls={walls}
-                  furniture={furniture}
-                  onUpdateWalls={setWalls}
-                  onUpdateFurniture={setFurniture}
-                  onSelectItem={setSelectedId}
-                  selectedId={selectedId}
-                  backgroundImage={uploadedImageUrl}
-                  sceneDimensions={sceneDimensions}
-                />
+                {uploadedImageUrl && (analysis || isProcessing) ? (
+                  <FloorplanAnalyzer
+                    imgUrl={uploadedImageUrl}
+                    analysis={analysis || { rooms: [], totalArea: 0, score: 0, summary: "", insights: [], flowIssues: [], recommendations: [] }}
+                    isAnalyzing={isProcessing}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-white/30">
+                    <div
+                      {...getRootProps()}
+                      className={`cursor-pointer rounded-2xl border-2 border-dashed p-12 transition-all max-w-md text-center ${
+                        isDragActive
+                          ? "border-[#4a90e2] bg-[#4a90e2]/10"
+                          : "border-white/10 hover:border-white/20 hover:bg-white/5"
+                      }`}
+                    >
+                      <input {...getInputProps()} />
+                      <div className="p-4 rounded-full bg-white/5 inline-block mb-4">
+                        <Upload className="w-8 h-8 text-white/30" />
+                      </div>
+                      <p className="text-sm font-medium text-white/60 mb-1">Upload a Floor Plan</p>
+                      <p className="text-xs text-white/30">
+                        Drag & drop or click to upload. AI will detect rooms, provide insights & recommendations.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             ) : (
               <motion.div
@@ -442,9 +327,9 @@ const Studio3DEditor = () => {
           </AnimatePresence>
         </div>
 
-        {/* Floating Controls */}
-        <div className="absolute bottom-6 right-6 flex flex-col space-y-2 z-40">
-          {view === "3d" && (
+        {/* Floating Controls for 3D */}
+        {view === "3d" && (
+          <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-40">
             <button
               onClick={async () => {
                 if (!sceneRef.current) return;
@@ -457,9 +342,8 @@ const Studio3DEditor = () => {
                   a.download = "archai-scene.glb";
                   a.click();
                   URL.revokeObjectURL(url);
-                  toast({ title: "Exported", description: "GLB file downloaded successfully." });
+                  toast({ title: "Exported", description: "GLB file downloaded." });
                 } catch (err: any) {
-                  console.error("GLB export failed:", err);
                   toast({ title: "Export Failed", description: err?.message || "Unknown error", variant: "destructive" });
                 } finally {
                   setIsExporting(false);
@@ -471,15 +355,8 @@ const Studio3DEditor = () => {
             >
               {isExporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
             </button>
-          )}
-          <button
-            onClick={handleReset}
-            className="p-3 bg-[#0d1225] border border-white/10 rounded-xl shadow-xl text-white/40 hover:text-red-400 transition-all hover:scale-105"
-            title="Clear All"
-          >
-            <RotateCcw className="w-5 h-5" />
-          </button>
-        </div>
+          </div>
+        )}
       </main>
     </div>
   );

@@ -65,3 +65,48 @@ export interface SceneState {
 
 export type EditMode = "wall" | "furniture" | "select" | "none";
 export type MarketplaceCategory = "furniture" | "lighting" | "decor" | "generated";
+
+// ── Floor Plan Analyzer Types ──
+
+export interface AnalyzedRoom {
+  id: string;
+  type: string;
+  label: string;
+  estimatedSqFt: number;
+  x: number;       // percentage 0-100
+  y: number;       // percentage 0-100
+  width: number;   // percentage 0-100
+  height: number;  // percentage 0-100
+  notes: string;
+}
+
+export interface AnalysisInsight {
+  type: "positive" | "warning" | "negative";
+  text: string;
+}
+
+export interface Recommendation {
+  id: string;
+  title: string;
+  description: string;
+  impact: "high" | "medium" | "low";
+  roomChanges: Array<{
+    id: string;
+    remove?: boolean;
+    width?: number;
+    height?: number;
+    label?: string;
+    type?: string;
+    notes?: string;
+  }>;
+}
+
+export interface FloorplanAnalysis {
+  rooms: AnalyzedRoom[];
+  totalArea: number;
+  score: number;
+  summary: string;
+  insights: AnalysisInsight[];
+  flowIssues: string[];
+  recommendations: Recommendation[];
+}
