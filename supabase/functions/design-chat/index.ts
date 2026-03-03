@@ -6,6 +6,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -14,7 +16,6 @@ serve(async (req) => {
   try {
     const { messages, roomContext } = await req.json();
 
-    // Build grounded system prompt
     let systemPrompt = `You are RoomBot, an expert AI interior design assistant inside the aivo Design Studio.
 
 CAPABILITIES:
@@ -36,7 +37,6 @@ RULES:
 5. Use markdown formatting for readability`;
 
     if (roomContext) {
-      // Extract key facts for grounding
       const objects = roomContext.objects || [];
       const objStr = objects.slice(0, 5).map((o: any) => 
         `${o.name || o.label}(${o.material || 'unknown'})`
@@ -76,80 +76,68 @@ DO NOT make up objects or metrics that aren't listed above.`;
 
     const allMessages = [{ role: "system", content: systemPrompt }, ...messages];
 
-    // Try Lovable AI Gateway first (most reliable)
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (LOVABLE_API_KEY) {
+    // Try Gemini first (primary)
+    const geminiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
+    if (geminiKey) {
       try {
-        console.log("Trying Lovable AI Gateway for chat...");
-        const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        console.log("Trying Gemini for chat...");
+        const response = await fetch(GEMINI_URL, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${LOVABLE_API_KEY}`,
+            Authorization: `Bearer ${geminiKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "google/gemini-3-flash-preview",
+            model: "gemini-2.5-flash",
             messages: allMessages,
             stream: true,
           }),
         });
 
         if (response.ok) {
-          console.log("Lovable AI streaming started");
+          console.log("Gemini streaming started");
           return new Response(response.body, {
             headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
           });
         }
 
         if (response.status === 429) {
-          console.warn("Lovable AI rate limited, falling back...");
-        } else if (response.status === 402) {
-          console.warn("Lovable AI payment required, falling back...");
+          console.warn("Gemini rate limited, falling back...");
         } else {
-          console.error("Lovable AI failed:", response.status);
+          console.error("Gemini failed:", response.status);
         }
       } catch (err) {
-        console.error("Lovable AI error:", err);
+        console.error("Gemini error:", err);
       }
     }
 
-    // Fallback: Gemini / OpenAI direct
-    const providers: Array<{ url: string; key: string; model: string; name: string }> = [];
-    
-    const geminiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
-    if (geminiKey) {
-      providers.push({ url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: geminiKey, model: "gemini-2.5-flash", name: "Gemini" });
-    }
+    // Fallback: OpenAI
     const openaiKey = Deno.env.get("OPENAI_API_KEY");
     if (openaiKey) {
-      providers.push({ url: "https://api.openai.com/v1/chat/completions", key: openaiKey, model: "gpt-4o-mini", name: "OpenAI" });
-    }
-
-    for (const provider of providers) {
       try {
-        console.log(`Trying ${provider.name} for chat...`);
-        const response = await fetch(provider.url, {
+        console.log("Trying OpenAI for chat...");
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${provider.key}`,
+            Authorization: `Bearer ${openaiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ model: provider.model, messages: allMessages, stream: true }),
+          body: JSON.stringify({ model: "gpt-4o-mini", messages: allMessages, stream: true }),
         });
 
         if (response.ok) {
-          console.log(`${provider.name} streaming started`);
+          console.log("OpenAI streaming started");
           return new Response(response.body, {
             headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
           });
         }
-        console.error(`${provider.name} failed: ${response.status}`);
+        console.error("OpenAI failed:", response.status);
       } catch (err) {
-        console.error(`${provider.name} error:`, err);
+        console.error("OpenAI error:", err);
       }
     }
 
-    return new Response(JSON.stringify({ error: "All AI providers failed. Please try again." }), {
+    return new Response(JSON.stringify({ error: "All AI providers failed. Please configure GOOGLE_GEMINI_API_KEY." }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
