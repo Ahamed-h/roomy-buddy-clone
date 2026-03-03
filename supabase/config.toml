@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.analyze-floorplan]
 verify_jwt = false
+
+[functions.generate-floorplan]
+verify_jwt = false
