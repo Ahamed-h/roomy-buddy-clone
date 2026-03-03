@@ -6,47 +6,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-interface AIProvider {
-  url: string;
-  key: string;
-  model: string;
-  name: string;
-}
-
-function getProviders(): AIProvider[] {
-  const providers: AIProvider[] = [];
-  const geminiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
-  if (geminiKey) {
-    providers.push({ url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: geminiKey, model: "gemini-2.5-flash", name: "Gemini" });
-  }
-  const openaiKey = Deno.env.get("OPENAI_API_KEY");
-  if (openaiKey) {
-    providers.push({ url: "https://api.openai.com/v1/chat/completions", key: openaiKey, model: "gpt-4o", name: "OpenAI" });
-  }
-  return providers;
-}
-
-async function callAI(providers: AIProvider[], messages: any[]): Promise<any> {
-  for (const provider of providers) {
-    try {
-      console.log(`Trying ${provider.name}...`);
-      const response = await fetch(provider.url, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${provider.key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: provider.model, messages }),
-      });
-      if (response.ok) {
-        console.log(`${provider.name} succeeded`);
-        return await response.json();
-      }
-      console.error(`${provider.name} failed: ${response.status}`);
-    } catch (err) {
-      console.error(`${provider.name} error:`, err);
-    }
-  }
-  throw new Error("All AI providers failed");
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -54,8 +13,8 @@ serve(async (req) => {
 
   try {
     const { analysisResult, imageBase64 } = await req.json();
-    const providers = getProviders();
-    if (providers.length === 0) throw new Error("No AI API keys configured");
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     const systemPrompt = `You are an expert interior design AI verifier. You will receive:
 1. A room photo
@@ -72,18 +31,46 @@ Your job is to cross-check and correct the analysis. Return ONLY valid JSON:
   "corrections_summary": string
 }`;
 
-    const data = await callAI(providers, [
-      { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content: [
-          { type: "text", text: `Verify these ML results:\n\n${JSON.stringify(analysisResult, null, 2)}\n\nExamine the photo and return corrected JSON.` },
-          { type: "image_url", image_url: { url: imageBase64 } },
-        ],
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
       },
-    ]);
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: `Verify these ML results:\n\n${JSON.stringify(analysisResult, null, 2)}\n\nExamine the photo and return corrected JSON.` },
+              { type: "image_url", image_url: { url: imageBase64 } },
+            ],
+          },
+        ],
+      }),
+    });
 
+    if (!response.ok) {
+      if (response.status === 429) {
+        return new Response(JSON.stringify({ error: "Rate limited, please try again later." }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (response.status === 402) {
+        return new Response(JSON.stringify({ error: "AI credits exhausted. Add funds in Lovable workspace settings." }), {
+          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const errText = await response.text();
+      console.error("AI gateway error:", response.status, errText);
+      throw new Error(`AI gateway error: ${response.status}`);
+    }
+
+    const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
+
     let correctedResult;
     try {
       const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
