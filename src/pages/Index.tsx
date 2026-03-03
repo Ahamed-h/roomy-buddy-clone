@@ -76,7 +76,7 @@ const stats = [
 const faqs = [
   {
     q: "What AI models are used?",
-    a: "YOLO v26n for object detection, OWL-ViT for open-vocabulary detection, CLIP for material classification, MiDaS for depth estimation, a custom ViT model for aesthetic scoring, and a TensorFlow model for style prediction. All run locally on CPU.",
+    a: "YOLO v26n for object detection, OWL-ViT for open-vocabulary detection, CLIP for material classification, MiDaS for depth estimation, a custom ViT model for aesthetic scoring, and a TensorFlow model for style prediction. All optimized for local CPU inference.",
   },
   {
     q: "Is the furniture real?",

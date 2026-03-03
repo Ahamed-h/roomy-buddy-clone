@@ -26,7 +26,7 @@ const models = [
   { icon: Brain, name: "TensorFlow Trait Model", desc: "Predicts lighting traits from room images for accurate style inference" },
   { icon: Paintbrush, name: "Style Inference Engine", desc: "Rule-based matching via trait_rules.json across 19 interior design styles" },
   { icon: Code, name: "Perception Correction", desc: "Post-processing for hierarchy, cohesion, texture, symmetry, and clutter balance" },
-  { icon: Camera, name: "Gemini Vision", desc: "Optional cross-validation to compare and verify model outputs" },
+  { icon: Camera, name: "Vision Cross-Check", desc: "Optional secondary analysis to compare and validate model outputs" },
 ];
 
 const capabilities = [
@@ -170,8 +170,8 @@ const About = () => {
               { label: "ML Server", value: "Python FastAPI — CPU-optimized models" },
               { label: "3D Engine", value: "React Three Fiber + Drei" },
               { label: "Floor Plans", value: "Konva canvas + AI analysis pipeline" },
-              { label: "Image Gen", value: "Gemini Vision + optional ComfyUI" },
-              { label: "LLM Chat", value: "Ollama (local) or Gemini (optional)" },
+              { label: "Image Gen", value: "AI Vision models + optional ComfyUI" },
+              { label: "LLM Chat", value: "Ollama (local) or cloud AI (optional)" },
             ].map((item, i) => (
               <motion.div
                 key={item.label}
