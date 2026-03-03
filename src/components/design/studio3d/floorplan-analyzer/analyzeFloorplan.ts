@@ -86,7 +86,7 @@ export async function analyzeFloorplan(imageBase64: string): Promise<FloorPlanAn
     }
   }
 
-  // Fallback to Supabase edge function
+  // Fallback to Supabase edge function (now returns FloorPlanAnalysis format directly)
   const rawB64 = imageBase64.replace(/^data:image\/[^;]+;base64,/, "");
   const { data, error } = await supabase.functions.invoke("analyze-floorplan", {
     body: { imageBase64: rawB64 },
@@ -94,9 +94,14 @@ export async function analyzeFloorplan(imageBase64: string): Promise<FloorPlanAn
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
   
-  // Edge function returns wall/furniture format, not room format - need to handle
-  // If it already has rooms array, use it directly
-  if (data?.rooms) return data as FloorPlanAnalysis;
+  // Edge function now returns FloorPlanAnalysis format with rooms having x, y, width, height as percentages
+  if (data?.rooms && Array.isArray(data.rooms) && data.rooms.length > 0) {
+    // Validate that rooms have the required percentage coordinate fields
+    const firstRoom = data.rooms[0];
+    if (typeof firstRoom.x === "number" && typeof firstRoom.width === "number") {
+      return data as FloorPlanAnalysis;
+    }
+  }
   
   throw new Error("Analysis returned unexpected format. Please try with a Gemini API key in settings.");
 }
