@@ -218,7 +218,7 @@ const Design2DTab = () => {
     try {
       const prompt = await buildSmartPrompt(extraNotes);
 
-      // Try ComfyUI first (fully local, unlimited)
+      // Try local ComfyUI first (fully local, unlimited)
       setPipelineStep("Generating (ComfyUI local)...");
       try {
         const fd = new FormData();
@@ -234,29 +234,28 @@ const Design2DTab = () => {
           }
         }
       } catch {
-        console.log("ComfyUI unavailable, trying repaint endpoint...");
+        console.log("ComfyUI unavailable, trying cloud generation...");
       }
 
-      // Try local repaint fallback
-      setPipelineStep("Generating (local repaint)...");
+      // Cloud fallback: Gemini image generation via edge function
+      setPipelineStep("Generating (Gemini cloud)...");
       try {
-        const fd = new FormData();
-        fd.append("file", currentImage);
-        fd.append("style_prompt", prompt);
-        const resp = await fetch(`${API}/design/generate/2d/repaint`, { method: "POST", body: fd });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.image_url) {
-            setGeneratedImageUrl(data.image_url);
-            addMessage("ai", "Here's your redesign! 👇 Tell me if you'd like any changes.", data.image_url);
-            return;
-          }
+        const editPrompt = `Redesign this room interior: ${prompt}. Keep the same room layout and structure. Make it photorealistic, high quality, professional interior photography.`;
+        const { data: result, error } = await supabase.functions.invoke("generate-image", {
+          body: { prompt: editPrompt, imageBase64: imageBase64 },
+        });
+        if (error) throw error;
+        if (result?.image_url) {
+          setGeneratedImageUrl(result.image_url);
+          addMessage("ai", `Here's your redesign via **Gemini AI**! 👇 Tell me if you'd like any changes.${result.description ? `\n\n${result.description}` : ""}`, result.image_url);
+          return;
         }
-      } catch {}
+        if (result?.error) throw new Error(result.error);
+      } catch (err: any) {
+        console.warn("Cloud generation failed:", err);
+      }
 
-      // ComfyUI is the only image generation backend
-      // Both local endpoints failed — inform the user
-      addMessage("ai", "❌ Image generation requires **ComfyUI** running locally. Please start ComfyUI at `localhost:8188` and the FastAPI backend at `localhost:8000`, then try again.\n\nSee SETUP.md for instructions.");
+      addMessage("ai", "❌ Image generation failed. Please check that the backend services are configured correctly.");
     } catch (err: any) {
       addMessage("ai", `❌ Generation failed: ${err.message}`);
     } finally {
