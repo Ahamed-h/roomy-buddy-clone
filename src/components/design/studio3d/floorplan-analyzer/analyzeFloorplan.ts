@@ -1,6 +1,4 @@
-import { directVision, hasDirectKeys } from "@/services/directAI";
-import { isOllamaAvailable, ollamaVision } from "@/services/ollama";
-import { supabase } from "@/integrations/supabase/client";
+import { geminiVision } from "@/services/geminiAI";
 import type { FloorPlanAnalysis } from "./types";
 
 const ANALYSIS_PROMPT = `You are a senior architectural space planner. Analyse the uploaded floor plan image carefully.
@@ -69,42 +67,11 @@ function isFloorPlanAnalysis(data: any): boolean {
 export async function analyzeFloorplan(imageBase64: string): Promise<FloorPlanAnalysis> {
   const prompt = ANALYSIS_PROMPT + "\n\nAnalyse this floor plan. Respond only with the JSON object.";
 
-  // Try Ollama first (local)
-  const ollamaOnline = await isOllamaAvailable();
-  if (ollamaOnline) {
-    try {
-      const raw = await ollamaVision(prompt, imageBase64);
-      const result = parseJSON(raw);
-      if (isFloorPlanAnalysis(result)) return result;
-      console.warn("Ollama returned unexpected format, trying next provider");
-    } catch (err) {
-      console.warn("Ollama floorplan analysis failed:", err);
-    }
-  }
+  const raw = await geminiVision(prompt, imageBase64);
+  const result = parseJSON(raw);
+  if (isFloorPlanAnalysis(result)) return result;
 
-  // Try direct API (Gemini/OpenAI from browser)
-  if (hasDirectKeys()) {
-    try {
-      const raw = await directVision(prompt, imageBase64);
-      const result = parseJSON(raw);
-      if (isFloorPlanAnalysis(result)) return result;
-      console.warn("Direct API returned unexpected format, trying next provider");
-    } catch (err) {
-      console.warn("Direct API floorplan analysis failed:", err);
-    }
-  }
-
-  // Fallback to Supabase edge function with format=floorplan-analysis
-  const rawB64 = imageBase64.replace(/^data:image\/[^;]+;base64,/, "");
-  const { data, error } = await supabase.functions.invoke("analyze-floorplan", {
-    body: { imageBase64: rawB64, format: "floorplan-analysis" },
-  });
-  if (error) throw error;
-  if (data?.error) throw new Error(data.error);
-  
-  if (isFloorPlanAnalysis(data)) return data as FloorPlanAnalysis;
-  
-  throw new Error("Analysis returned unexpected format. Please configure a Gemini API key in settings or try again.");
+  throw new Error("Analysis returned unexpected format. Please try again.");
 }
 
 export function applyRecommendations(
