@@ -6,7 +6,7 @@ import { InsightsPanel, LegendPanel, EditPanel } from "./SidePanels";
 import { analyzeFloorplan } from "./analyzeFloorplan";
 import type { AnalyzedRoom, FloorPlanAnalysis } from "./types";
 import { ROOM_COLORS } from "./types";
-import { supabase } from "@/integrations/supabase/client";
+
 
 type Step = "upload" | "analyzing" | "results" | "generating" | "generated";
 
@@ -120,39 +120,26 @@ export default function FloorPlanAnalyzer() {
     setError(null);
 
     try {
-      // Gather all AI recommendations text
+      const { puterGenerateImage } = await import("@/services/puterAI");
+
       const aiRecs = analysis.recommendations?.map(r => `${r.title}: ${r.description}`) || [];
       const selectedRecs = selectedAiSuggestions.length > 0 ? selectedAiSuggestions : aiRecs;
 
-      // Strip the data URL prefix for the edge function
-      const rawB64 = imgBase64?.replace(/^data:image\/[^;]+;base64,/, "") || null;
+      const roomDesc = rooms.map(r => `${r.label} (${r.estimatedSqFt} sqft)`).join(", ");
+      const prompt = `Architectural floor plan blueprint, top-down view, professional drafting style. Rooms: ${roomDesc}. Total area: ${analysis.totalArea} sqft. ${analysis.summary}. Apply these improvements: ${selectedRecs.join("; ")}. ${userSuggestions.trim() ? "User notes: " + userSuggestions.trim() : ""} Clean lines, labeled rooms, accurate proportions.`;
 
-      const { data, error: fnError } = await supabase.functions.invoke("generate-floorplan", {
-        body: {
-          analysisData: { ...analysis, rooms },
-          aiSuggestions: selectedRecs,
-          userSuggestions: userSuggestions.trim(),
-          imageBase64: imgBase64, // Send full data URL for image editing
-        },
-      });
+      const dataUrl = await puterGenerateImage(prompt, "dall-e-3");
 
-      if (fnError) throw fnError;
-      if (data?.error) throw new Error(data.error);
-
-      if (data?.image_url) {
-        setGeneratedImage(data.image_url);
-        setGeneratedDescription(data.description || "");
-        setStep("generated");
-        toast({ title: "Floor Plan Generated!", description: "Your redesigned floor plan is ready." });
-      } else {
-        throw new Error("No image was generated. Try again.");
-      }
+      setGeneratedImage(dataUrl);
+      setGeneratedDescription(selectedRecs.join(". "));
+      setStep("generated");
+      toast({ title: "Floor Plan Generated!", description: "Your redesigned floor plan is ready." });
     } catch (e: any) {
       setError("Generation failed: " + e.message);
       setStep("results");
       toast({ title: "Generation Failed", description: e.message, variant: "destructive" });
     }
-  }, [analysis, rooms, selectedAiSuggestions, userSuggestions, imgBase64, toast]);
+  }, [analysis, rooms, selectedAiSuggestions, userSuggestions, toast]);
 
   const handleDownload = useCallback(() => {
     if (!generatedImage) return;
