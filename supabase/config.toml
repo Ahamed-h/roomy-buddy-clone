@@ -1,16 +1,10 @@
 project_id = "whlzqtupucxeqkaqmcds"
 
-[functions.design-chat]
-verify_jwt = false
-
-[functions.verify-analysis]
-verify_jwt = false
-
-[functions.generate-image]
-verify_jwt = false
-
-[functions.analyze-floorplan]
+[functions.gemini-ai]
 verify_jwt = false
 
 [functions.generate-floorplan]
+verify_jwt = false
+
+[functions.analyze-floorplan]
 verify_jwt = false

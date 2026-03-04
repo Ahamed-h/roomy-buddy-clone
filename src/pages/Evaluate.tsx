@@ -61,22 +61,31 @@ const Evaluate = () => {
     setVerifying(true);
     try {
       const imageBase64 = await fileToBase64(imageFile);
-      const { data, error } = await supabase.functions.invoke("verify-analysis", {
-        body: { analysisResult, imageBase64 },
+      const { data, error } = await supabase.functions.invoke("gemini-ai", {
+        body: {
+          action: "vision",
+          prompt: `You are verifying an ML analysis of a room photo. The ML model produced these results: ${JSON.stringify(analysisResult)}. Cross-check against the image. Return corrected JSON with the same schema: aesthetic_score (0-10), lighting, objects (array), style_match_scores, possible_styles, recommendations.`,
+          imageBase64,
+        },
       });
 
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
+      // Parse the text response as JSON
+      const rawText = data.text || "{}";
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+
       // Merge corrected results back
       const corrected: AnalysisResult = {
         ...analysisResult,
-        aesthetic_score: data.aesthetic_score ?? analysisResult.aesthetic_score,
-        lighting: data.lighting ?? analysisResult.lighting,
-        objects: data.objects ?? analysisResult.objects,
-        style_match_scores: data.style_match_scores ?? analysisResult.style_match_scores,
-        possible_styles: data.possible_styles ?? analysisResult.possible_styles,
-        recommendations: data.recommendations ?? analysisResult.recommendations,
+        aesthetic_score: parsed.aesthetic_score ?? analysisResult.aesthetic_score,
+        lighting: parsed.lighting ?? analysisResult.lighting,
+        objects: parsed.objects ?? analysisResult.objects,
+        style_match_scores: parsed.style_match_scores ?? analysisResult.style_match_scores,
+        possible_styles: parsed.possible_styles ?? analysisResult.possible_styles,
+        recommendations: parsed.recommendations ?? analysisResult.recommendations,
       };
 
       // Rebuild legacy fields

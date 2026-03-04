@@ -15,12 +15,14 @@ import {
   Wand2,
   Download,
   Loader2,
+  Send,
+  Bot,
+  User,
   Save,
 } from "lucide-react";
 import { saveDesign } from "@/lib/designs";
 import { cn } from "@/lib/utils";
-
-const API = "http://localhost:8000"; // ✅ Forced local backend
+import { geminiGenerateImage, geminiChat } from "@/services/geminiAI";
 
 const ROOM_TYPES = [
   "Bedroom",
@@ -60,12 +62,11 @@ const Design2DTab = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const [currentImage, setCurrentImage] = useState<File | null>(null);
+  const [currentImageBase64, setCurrentImageBase64] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [roomType, setRoomType] = useState("Bedroom");
   const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
-  const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -93,34 +94,19 @@ const Design2DTab = () => {
     []
   );
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setCurrentImage(file);
-    setImagePreview(URL.createObjectURL(file));
-    setGeneratedImageUrl(null);
-    setAnalysisResult(null);
-
-    addMessage("ai", "Analyzing room...");
-
-    const fd = new FormData();
-    fd.append("file", file);
-
-    try {
-      const resp = await fetch(`${API}/analyze`, {
-        method: "POST",
-        body: fd,
-      });
-
-      if (!resp.ok) throw new Error("Analysis failed");
-
-      const data = await resp.json();
-      setAnalysisResult(data);
-      addMessage("ai", `✅ Analysis complete! Score: ${data.aesthetic_score}/10`);
-    } catch {
-      addMessage("ai", "⚠️ Analysis unavailable.");
-    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target?.result as string;
+      setCurrentImageBase64(base64);
+      setImagePreview(base64);
+      setGeneratedImageUrl(null);
+      addMessage("ai", "📸 Room photo uploaded! Select themes and click Redesign, or tell me what to change.");
+    };
+    reader.readAsDataURL(file);
   };
 
   const toggleTheme = (id: string) => {
@@ -136,45 +122,41 @@ const Design2DTab = () => {
       .map((id) => THEMES.find((t) => t.id === id)?.label)
       .join(", ");
 
-    return `Redesign this ${roomType.toLowerCase()} in ${themeStr} style. ${extraNotes}. Photorealistic.`;
+    return `Redesign this ${roomType.toLowerCase()} in ${themeStr || "modern"} style. ${extraNotes}. Keep the same room layout and perspective. Photorealistic interior design.`;
   };
 
   const generateImage = async (extraNotes = "") => {
-    if (!currentImage) return;
+    if (!currentImageBase64) return;
 
     setIsGenerating(true);
-    addMessage("ai", "🎨 Generating your redesign...");
+    addMessage("ai", "🎨 Generating your redesign with Gemini AI...");
 
     const prompt = buildPrompt(extraNotes);
 
-    const fd = new FormData();
-    fd.append("file", currentImage);
-    fd.append("style_prompt", prompt);
-
     try {
-      const resp = await fetch(`${API}/design/generate/2d/repaint`, {
-        method: "POST",
-        body: fd,
-      });
+      const result = await geminiGenerateImage(prompt, currentImageBase64);
 
-      if (!resp.ok) throw new Error("Generation failed");
-
-      const data = await resp.json();
-      setGeneratedImageUrl(data.image_url);
-      addMessage("ai", "Here is your redesign 👇", data.image_url);
-    } catch {
-      addMessage("ai", "❌ Image generation failed.");
+      if (result.image_url) {
+        setGeneratedImageUrl(result.image_url);
+        addMessage("ai", "Here is your redesign 👇", result.image_url);
+      } else if (result.description) {
+        addMessage("ai", `💡 ${result.description}`);
+      } else {
+        addMessage("ai", "❌ No image was generated. Please try again.");
+      }
+    } catch (err: any) {
+      addMessage("ai", `❌ Generation failed: ${err.message}`);
+      toast({ title: "Generation failed", description: err.message, variant: "destructive" });
     }
 
     setIsGenerating(false);
   };
 
   const handleGenerate = async () => {
-    if (!currentImage || selectedThemes.length === 0) {
+    if (!currentImageBase64 || selectedThemes.length === 0) {
       toast({ title: "Upload photo and select at least one theme" });
       return;
     }
-
     await generateImage();
   };
 
@@ -185,23 +167,24 @@ const Design2DTab = () => {
     setInputMessage("");
     addMessage("user", msg);
 
-    const isModify =
-      generatedImageUrl &&
-      /change|add|remove|make|more|less|update|modify/i.test(msg);
-
-    if (isModify) {
+    // If there's a generated image, treat as a modification request
+    if (generatedImageUrl && /change|add|remove|make|more|less|update|modify|warmer|cooler|brighter|darker/i.test(msg)) {
       await generateImage(msg);
       return;
     }
 
+    // Otherwise use Gemini chat for design advice
     setIsTyping(true);
-    setTimeout(() => {
-      addMessage(
-        "ai",
-        "Try saying something like: 'Make it warmer lighting' or 'Add wooden shelves'."
+    try {
+      const reply = await geminiChat(
+        [{ role: "user", content: msg }],
+        "You are an interior design assistant. Give brief, actionable advice. If the user describes changes, suggest they click 'Redesign Room' to see the result."
       );
-      setIsTyping(false);
-    }, 800);
+      addMessage("ai", reply);
+    } catch {
+      addMessage("ai", "Try saying something like: 'Make it warmer' or 'Add wooden shelves', then click Redesign.");
+    }
+    setIsTyping(false);
   };
 
   const handleDownload = () => {
@@ -214,22 +197,23 @@ const Design2DTab = () => {
 
   const handleSave = async () => {
     if (!generatedImageUrl) return;
-
     setIsSaving(true);
-
-    await saveDesign({
-      type: "2d",
-      name: `${roomType}`,
-      thumbnail_url: generatedImageUrl,
-      data: { roomType, themes: selectedThemes },
-    });
-
-    toast({ title: "Design saved!" });
+    try {
+      await saveDesign({
+        type: "2d",
+        name: `${roomType}`,
+        thumbnail_url: generatedImageUrl,
+        data: { roomType, themes: selectedThemes },
+      });
+      toast({ title: "Design saved!" });
+    } catch {
+      toast({ title: "Save failed", variant: "destructive" });
+    }
     setIsSaving(false);
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 p-4 h-full">
+    <div className="flex flex-col lg:flex-row gap-4 h-full">
       {/* LEFT PANEL */}
       <div className="w-full lg:w-80 space-y-4 shrink-0">
         <Card>
@@ -296,28 +280,64 @@ const Design2DTab = () => {
       </div>
 
       {/* RIGHT PANEL */}
-      <div className="flex-1 min-w-0">
-        <Card className="h-full">
+      <div className="flex-1 min-w-0 flex flex-col">
+        <Card className="flex-1">
           <CardContent className="p-4 h-full flex flex-col">
-            {generatedImageUrl ? (
-              <>
-                <img src={generatedImageUrl} alt="Redesign" className="rounded-lg max-h-[60vh] object-contain mx-auto" />
-                <div className="flex gap-2 mt-3 justify-center">
-                  <Button size="sm" variant="outline" onClick={handleSave} disabled={isSaving}>
-                    <Save className="w-4 h-4 mr-1" />
-                    {isSaving ? "Saving..." : "Save"}
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={handleDownload}>
-                    <Download className="w-4 h-4 mr-1" />
-                    Download
-                  </Button>
+            {/* Chat / Image area */}
+            <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 mb-3 min-h-[300px]">
+              {chatHistory.map((msg, i) => (
+                <div key={i} className={cn("flex gap-2", msg.role === "user" ? "justify-end" : "justify-start")}>
+                  {msg.role === "ai" && <Bot className="w-5 h-5 text-primary shrink-0 mt-1" />}
+                  <div className={cn(
+                    "rounded-lg px-3 py-2 max-w-[80%] text-sm",
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-foreground"
+                  )}>
+                    <p>{msg.content}</p>
+                    {msg.imageUrl && (
+                      <img src={msg.imageUrl} alt="Generated" className="rounded-lg mt-2 max-h-[50vh] object-contain" />
+                    )}
+                  </div>
+                  {msg.role === "user" && <User className="w-5 h-5 text-muted-foreground shrink-0 mt-1" />}
                 </div>
-              </>
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-muted-foreground">
-                <p className="text-sm">Upload and redesign your room.</p>
+              ))}
+              {isTyping && (
+                <div className="flex gap-2">
+                  <Bot className="w-5 h-5 text-primary shrink-0 mt-1" />
+                  <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground">Thinking…</div>
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons for generated image */}
+            {generatedImageUrl && (
+              <div className="flex gap-2 mb-3 justify-center">
+                <Button size="sm" variant="outline" onClick={handleSave} disabled={isSaving}>
+                  <Save className="w-4 h-4 mr-1" />
+                  {isSaving ? "Saving..." : "Save"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleDownload}>
+                  <Download className="w-4 h-4 mr-1" />
+                  Download
+                </Button>
               </div>
             )}
+
+            {/* Chat input */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleChatSubmit()}
+                placeholder="Ask about design or request changes..."
+                className="flex-1 border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground placeholder:text-muted-foreground"
+              />
+              <Button size="sm" onClick={handleChatSubmit} disabled={isTyping || isGenerating}>
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

@@ -160,8 +160,8 @@ const About = () => {
               { label: "ML Server", value: "Python FastAPI — CPU-optimized models" },
               { label: "3D Engine", value: "React Three Fiber + Drei" },
               { label: "Floor Plans", value: "Konva canvas + AI analysis pipeline" },
-              { label: "Image Gen", value: "AI Vision models + optional ComfyUI" },
-              { label: "LLM Chat", value: "Ollama (local) or cloud AI (optional)" },
+              { label: "Image Gen", value: "Gemini AI image generation" },
+              { label: "LLM Chat", value: "Gemini AI chat & vision" },
             ].map((item, i) => (
               <motion.div
                 key={item.label}
