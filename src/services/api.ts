@@ -70,7 +70,7 @@ export interface FloorPlanGenerateResult {
 // Helper — convert File to base64 data URL
 // ==============================================================
 
-async function fileToBase64(file: File): Promise<string> {
+export async function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -218,24 +218,77 @@ export async function designChat(
   _sessionId = "default",
   _includeAnalysis = false,
   _analysisJson = "",
+  conversationHistory?: { role: string; content: string }[],
+  imageBase64?: string,
 ): Promise<ChatResult> {
-  const systemPrompt = `You are an expert AI interior design assistant for the Roomy Buddy app.
-You help users with interior design advice, room styling, and redesign suggestions.
-When a user asks for a redesign or makeover, set action to "generate" and provide a detailed style_prompt.
+  const wantsGenerate = /\bgenerate\b/i.test(message);
+
+  const systemPrompt = wantsGenerate
+    ? `You are an expert AI interior design assistant. The user wants to generate a redesigned room image.
+Review the ENTIRE conversation history to understand what style, mood, colors, furniture, and changes the user wants.
+Synthesize all their requests into ONE comprehensive design prompt.
 Always respond with valid JSON:
 {
-  "response": "Your helpful advice here",
-  "action": "none or generate",
-  "style_prompt": "detailed prompt if action=generate, otherwise empty",
+  "response": "Brief description of what you're generating",
+  "action": "generate",
+  "style_prompt": "Detailed, comprehensive prompt synthesizing ALL conversation requirements for image generation. Include style, colors, furniture, mood, lighting, materials mentioned across the conversation.",
   "suggested_style": "one of: minimalist, luxury, scandinavian, modern, industrial, bohemian, mediterranean, japandi"
+}`
+    : `You are an expert AI interior design assistant for the Roomy Buddy app.
+You help users explore interior design ideas through conversation. Ask clarifying questions about their preferences — style, colors, mood, furniture, lighting, materials.
+Build a clear picture of what they want before they say "generate".
+Always respond with valid JSON:
+{
+  "response": "Your helpful design advice and questions here",
+  "action": "none",
+  "style_prompt": "",
+  "suggested_style": ""
 }`;
 
+  // Use full conversation history if provided, otherwise just the single message
+  const messages = conversationHistory || [{ role: "user", content: message }];
+
+  // If generating with image, use generate-image action directly
+  if (wantsGenerate && imageBase64) {
+    // First get the synthesized prompt from chat
+    const { data: chatData, error: chatError } = await supabase.functions.invoke("gemini-ai", {
+      body: { action: "chat", messages, systemPrompt },
+    });
+    if (chatError) throw chatError;
+    if (chatData?.error) throw new Error(chatData.error);
+
+    const rawText = chatData.text || "";
+    let stylePrompt = message;
+    let response = "Here's your redesign!";
+    try {
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        stylePrompt = parsed.style_prompt || message;
+        response = parsed.response || response;
+      }
+    } catch { /* use defaults */ }
+
+    // Now generate image with the synthesized prompt + original photo
+    const genPrompt = `Redesign this room based on these requirements: ${stylePrompt}. Keep the same room layout and perspective. Photorealistic interior design, professional photography, 4K quality.`;
+
+    const { data: genData, error: genError } = await supabase.functions.invoke("gemini-ai", {
+      body: { action: "generate-image", prompt: genPrompt, imageBase64 },
+    });
+    if (genError) throw genError;
+    if (genData?.error) throw new Error(genData.error);
+
+    return {
+      response,
+      action: "generate",
+      image_url: genData.image_url || null,
+      style_prompt: stylePrompt,
+      suggested_style: "modern",
+    };
+  }
+
   const { data, error } = await supabase.functions.invoke("gemini-ai", {
-    body: {
-      action: "chat",
-      messages: [{ role: "user", content: message }],
-      systemPrompt,
-    },
+    body: { action: "chat", messages, systemPrompt },
   });
 
   if (error) throw error;

@@ -1,36 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Upload, Wand2, Download, Loader2, Send, Bot, User, Save,
+  Upload, Download, Loader2, Send, Bot, User, Save, ImagePlus,
 } from "lucide-react";
 import { saveDesign } from "@/lib/designs";
 import { cn } from "@/lib/utils";
 import {
-  repaintRoom, designChat,
+  designChat, fileToBase64,
   type ChatResult,
 } from "@/services/api";
-
-const ROOM_TYPES = [
-  "Bedroom", "Living Room", "Kitchen", "Bathroom",
-  "Dining Room", "Office", "Kids Room",
-];
-
-const STYLES = [
-  { id: "modern", label: "Modern" },
-  { id: "minimalist", label: "Minimalist" },
-  { id: "scandinavian", label: "Scandinavian" },
-  { id: "industrial", label: "Industrial" },
-  { id: "luxury", label: "Luxury" },
-  { id: "bohemian", label: "Bohemian" },
-  { id: "mediterranean", label: "Mediterranean" },
-  { id: "japandi", label: "Japandi" },
-];
 
 interface ChatMessage {
   role: "user" | "ai";
@@ -45,8 +25,6 @@ const Design2DTab = () => {
 
   const [currentImage, setCurrentImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [roomType, setRoomType] = useState("Living Room");
-  const [selectedStyle, setSelectedStyle] = useState("modern");
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -54,7 +32,7 @@ const Design2DTab = () => {
   const [inputMessage, setInputMessage] = useState("");
 
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
-    { role: "ai", content: "Hi 👋 Upload a room photo, select a style, and click Redesign — or ask me for design advice!" },
+    { role: "ai", content: "Hi 👋 I'm your interior design assistant! Upload a room photo and tell me what you'd like — describe styles, colors, furniture changes, or moods. When you're ready, just say **\"generate\"** and I'll create a redesign based on our conversation." },
   ]);
 
   useEffect(() => {
@@ -71,46 +49,11 @@ const Design2DTab = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     setCurrentImage(file);
-    setImagePreview(URL.createObjectURL(file));
+    const url = URL.createObjectURL(file);
+    setImagePreview(url);
     setGeneratedImageUrl(null);
-    addMessage("ai", "📸 Room photo uploaded! Select a style and click Redesign, or tell me what to change.");
-  };
-
-  const buildPrompt = (extra = "") => {
-    const styleLabel = STYLES.find((s) => s.id === selectedStyle)?.label || "modern";
-    return `Redesign this ${roomType.toLowerCase()} in ${styleLabel} style. ${extra}. Keep the same room layout and perspective. Photorealistic interior design.`;
-  };
-
-  const generateImage = async (extraNotes = "") => {
-    if (!currentImage) return;
-    setIsGenerating(true);
-    addMessage("ai", "🎨 Generating redesign with AI...");
-
-    try {
-      const result = await repaintRoom(
-        currentImage,
-        buildPrompt(extraNotes),
-        selectedStyle,
-      );
-      if (result.image_url) {
-        setGeneratedImageUrl(result.image_url);
-        addMessage("ai", `Here is your ${STYLES.find(s => s.id === selectedStyle)?.label} redesign 👇`, result.image_url);
-      } else {
-        addMessage("ai", `Design description: ${result.description}`);
-      }
-    } catch (err: any) {
-      addMessage("ai", `❌ Generation failed: ${err.message}`);
-      toast({ title: "Generation failed", description: err.message, variant: "destructive" });
-    }
-    setIsGenerating(false);
-  };
-
-  const handleGenerate = async () => {
-    if (!currentImage) {
-      toast({ title: "Upload a room photo first" });
-      return;
-    }
-    await generateImage();
+    addMessage("user", "📸 [Uploaded a room photo]", url);
+    addMessage("ai", "Great photo! Tell me about the style, mood, or changes you'd like. When you're happy with the direction, say **\"generate\"** and I'll create the redesign.");
   };
 
   const handleChatSubmit = async () => {
@@ -119,9 +62,39 @@ const Design2DTab = () => {
     setInputMessage("");
     addMessage("user", msg);
 
+    // Build conversation history for the API (exclude system-only messages)
+    const conversationForApi = chatHistory
+      .filter((m) => !m.content.startsWith("📸 [Uploaded"))
+      .map((m) => ({
+        role: m.role === "ai" ? "assistant" : "user",
+        content: m.content,
+      }));
+    conversationForApi.push({ role: "user", content: msg });
+
+    // Check if user wants to generate
+    const wantsGenerate = /\bgenerate\b/i.test(msg);
+
+    if (wantsGenerate && !currentImage) {
+      addMessage("ai", "Please upload a room photo first so I can generate a redesign based on our conversation.");
+      return;
+    }
+
     setIsTyping(true);
     try {
-      const result: ChatResult = await designChat(msg);
+      // Get image base64 if available and user wants generation
+      let imageBase64: string | undefined;
+      if (currentImage && wantsGenerate) {
+        imageBase64 = await fileToBase64(currentImage);
+      }
+
+      const result: ChatResult = await designChat(
+        msg,
+        "default",
+        false,
+        "",
+        conversationForApi,
+        imageBase64,
+      );
 
       if (result.action === "generate" && result.image_url) {
         setGeneratedImageUrl(result.image_url);
@@ -149,13 +122,12 @@ const Design2DTab = () => {
     try {
       await saveDesign({
         type: "2d",
-        name: `${roomType} – ${STYLES.find(s => s.id === selectedStyle)?.label}`,
+        name: `AI Chat Redesign – ${new Date().toLocaleDateString()}`,
         thumbnail_url: generatedImageUrl,
         data: {
-          roomType,
-          style: selectedStyle,
           originalImage: imagePreview,
           generatedImage: generatedImageUrl,
+          chatHistory: chatHistory.map((m) => ({ role: m.role, content: m.content })),
         },
       });
       toast({ title: "Design saved!" });
@@ -167,9 +139,8 @@ const Design2DTab = () => {
 
   return (
     <div className="flex flex-col lg:flex-row gap-4 h-full">
-      {/* LEFT PANEL */}
-      <div className="w-full lg:w-80 space-y-4 shrink-0">
-        {/* Upload */}
+      {/* LEFT PANEL — Upload only */}
+      <div className="w-full lg:w-72 space-y-4 shrink-0">
         <Card>
           <CardContent className="p-3">
             <div
@@ -181,7 +152,8 @@ const Design2DTab = () => {
               ) : (
                 <div className="flex flex-col items-center gap-2 text-muted-foreground">
                   <Upload className="w-8 h-8" />
-                  <span className="text-sm">Upload JPG / PNG</span>
+                  <span className="text-sm">Upload Room Photo</span>
+                  <span className="text-xs">JPG / PNG</span>
                 </div>
               )}
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
@@ -189,36 +161,18 @@ const Design2DTab = () => {
           </CardContent>
         </Card>
 
-        {/* Room type */}
-        <Card>
-          <CardContent className="p-3">
-            <Label className="text-xs mb-1 block">Room Type</Label>
-            <Select value={roomType} onValueChange={setRoomType}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {ROOM_TYPES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-
-        {/* Style */}
-        <Card>
-          <CardContent className="p-3">
-            <Label className="text-xs mb-1 block">Design Style</Label>
-            <Select value={selectedStyle} onValueChange={setSelectedStyle}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {STYLES.map((s) => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-
-        <Button onClick={handleGenerate} disabled={isGenerating} className="w-full gap-2 btn-premium">
-          {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-          {isGenerating ? "Generating..." : "Redesign Room"}
-        </Button>
+        {imagePreview && (
+          <Card>
+            <CardContent className="p-3 text-xs text-muted-foreground space-y-2">
+              <p className="font-medium text-foreground text-sm">How it works</p>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>Describe the style, mood, or changes you want</li>
+                <li>Chat back and forth to refine your vision</li>
+                <li>Say <strong>"generate"</strong> when ready</li>
+              </ol>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* RIGHT PANEL — Chat */}
@@ -233,9 +187,9 @@ const Design2DTab = () => {
                     "rounded-lg px-3 py-2 max-w-[80%] text-sm",
                     msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
                   )}>
-                    <p>{msg.content}</p>
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
                     {msg.imageUrl && (
-                      <img src={msg.imageUrl} alt="Generated" className="rounded-lg mt-2 max-h-[50vh] object-contain" />
+                      <img src={msg.imageUrl} alt="Room" className="rounded-lg mt-2 max-h-[50vh] object-contain" />
                     )}
                   </div>
                   {msg.role === "user" && <User className="w-5 h-5 text-muted-foreground shrink-0 mt-1" />}
@@ -244,7 +198,9 @@ const Design2DTab = () => {
               {isTyping && (
                 <div className="flex gap-2">
                   <Bot className="w-5 h-5 text-primary shrink-0 mt-1" />
-                  <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground">Thinking…</div>
+                  <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground">
+                    {isGenerating ? "🎨 Generating your redesign..." : "Thinking…"}
+                  </div>
                 </div>
               )}
             </div>
@@ -261,15 +217,24 @@ const Design2DTab = () => {
             )}
 
             <div className="flex gap-2">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                title="Upload room photo"
+              >
+                <ImagePlus className="w-4 h-4" />
+              </Button>
               <input
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleChatSubmit()}
-                placeholder="Ask about design or request changes..."
+                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChatSubmit()}
+                placeholder={currentImage ? 'Describe your vision, then say "generate"...' : "Upload a photo first, then describe your style..."}
                 className="flex-1 border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground placeholder:text-muted-foreground"
               />
-              <Button size="sm" onClick={handleChatSubmit} disabled={isTyping || isGenerating}>
+              <Button size="sm" onClick={handleChatSubmit} disabled={isTyping || !inputMessage.trim()}>
                 <Send className="w-4 h-4" />
               </Button>
             </div>
