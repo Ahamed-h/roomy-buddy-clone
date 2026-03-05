@@ -2,20 +2,18 @@ import { useState, useCallback } from "react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
 import {
-  Upload, Settings, BarChart3, Eye, Sparkles, ArrowRight,
-  Download, Info, Loader2, ImageIcon, Layers, Save, ShieldCheck
+  Upload, BarChart3, Eye, Sparkles, ArrowRight,
+  Download, Info, Save,
 } from "lucide-react";
-import { analyzeRoom, getHfSpacesUrl, setHfSpacesUrl, type AnalysisResult } from "@/services/api";
+import { analyzeRoom, type AnalysisResult } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { saveDesign } from "@/lib/designs";
-import { supabase } from "@/integrations/supabase/client";
 import RoomInsight from "@/components/RoomInsight";
 
 const Evaluate = () => {
@@ -24,12 +22,7 @@ const Evaluate = () => {
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [verifying, setVerifying] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [correctionsSummary, setCorrectionsSummary] = useState<string | null>(null);
-  const [isVerified, setIsVerified] = useState(false);
-  const [hfUrl, setHfUrl] = useState(getHfSpacesUrl());
-  const [showSettings, setShowSettings] = useState(false);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -48,93 +41,20 @@ const Evaluate = () => {
     }
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const verifyWithAI = async (analysisResult: AnalysisResult, imageFile: File) => {
-    setVerifying(true);
-    try {
-      const imageBase64 = await fileToBase64(imageFile);
-      const { data, error } = await supabase.functions.invoke("gemini-ai", {
-        body: {
-          action: "vision",
-          prompt: `You are verifying an ML analysis of a room photo. The ML model produced these results: ${JSON.stringify(analysisResult)}. Cross-check against the image. Return corrected JSON with the same schema: aesthetic_score (0-10), lighting, objects (array), style_match_scores, possible_styles, recommendations.`,
-          imageBase64,
-        },
-      });
-
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
-      // Parse the text response as JSON
-      const rawText = data.text || "{}";
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
-
-      // Merge corrected results back
-      const corrected: AnalysisResult = {
-        ...analysisResult,
-        aesthetic_score: parsed.aesthetic_score ?? analysisResult.aesthetic_score,
-        lighting: parsed.lighting ?? analysisResult.lighting,
-        objects: parsed.objects ?? analysisResult.objects,
-        style_match_scores: parsed.style_match_scores ?? analysisResult.style_match_scores,
-        possible_styles: parsed.possible_styles ?? analysisResult.possible_styles,
-        recommendations: parsed.recommendations ?? analysisResult.recommendations,
-      };
-
-      // Rebuild legacy fields
-      if (corrected.style_match_scores) {
-        corrected.top_styles = Object.entries(corrected.style_match_scores)
-          .map(([style, score]) => ({ style, score: score as number }))
-          .sort((a, b) => b.score - a.score);
-      }
-      if (corrected.lighting) {
-        corrected.brightness = corrected.lighting.brightness;
-      }
-
-      setResult(corrected);
-      setCorrectionsSummary(data.corrections_summary || null);
-      setIsVerified(true);
-      sessionStorage.setItem("aivo_analysis", JSON.stringify(corrected));
-
-      toast({ title: "AI Verification Complete!", description: data.corrections_summary || "Results have been cross-checked." });
-    } catch (err) {
-      console.error("AI verification error:", err);
-      toast({
-        title: "AI verification failed",
-        description: `${err instanceof Error ? err.message : "Unknown error"}. Local results are still shown.`,
-        variant: "destructive",
-      });
-    } finally {
-      setVerifying(false);
-    }
-  };
-
   const runAnalysis = async () => {
     if (!image) return;
     setLoading(true);
-    setIsVerified(false);
-    setCorrectionsSummary(null);
     try {
       const data = await analyzeRoom(image);
       setResult(data);
       sessionStorage.setItem("aivo_analysis", JSON.stringify(data));
       if (imagePreview) sessionStorage.setItem("aivo_image", imagePreview);
-      toast({ title: "Local analysis complete!", description: "Now cross-checking with AI..." });
-
-      // Auto-run AI verification
-      await verifyWithAI(data, image);
+      toast({ title: "AI Analysis complete!", description: "Room has been analyzed using Lovable AI." });
     } catch (err) {
-      console.error("Analysis fetch error:", err);
+      console.error("Analysis error:", err);
       toast({
         title: "Analysis failed",
-        description: `Could not reach backend at ${getHfSpacesUrl()}. Error: ${err instanceof Error ? err.message : "unknown"}. Check Settings to verify the URL.`,
+        description: `${err instanceof Error ? err.message : "Unknown error"}. Please try again.`,
         variant: "destructive",
       });
     } finally {
@@ -158,38 +78,10 @@ const Evaluate = () => {
       <Navbar />
 
       <div className="container py-12">
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="font-display text-3xl font-bold text-foreground">AI Room Evaluation</h1>
-            <p className="mt-1 text-muted-foreground">Upload a room photo to analyze with real ML models, then AI-verified.</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setShowSettings(!showSettings)} className="border-border/50 hover:border-primary/30">
-            <Settings className="mr-2 h-4 w-4" /> Settings
-          </Button>
+        <div className="mb-8">
+          <h1 className="font-display text-3xl font-bold text-foreground">AI Room Evaluation</h1>
+          <p className="mt-1 text-muted-foreground">Upload a room photo to analyze with AI — powered by Lovable AI Gateway.</p>
         </div>
-
-        {/* Settings */}
-        {showSettings && (
-          <Card className="mb-6 glass-card-static">
-            <CardContent className="pt-6">
-              <label className="text-sm font-medium text-foreground">Local ML Server URL</label>
-              <div className="mt-2 flex gap-2">
-                <Input
-                  value={hfUrl}
-                  onChange={(e) => setHfUrl(e.target.value)}
-                  placeholder="http://localhost:8000"
-                  className="bg-muted/50 border-border/50 focus:border-primary/50"
-                />
-                <Button onClick={() => { setHfSpacesUrl(hfUrl); toast({ title: "Saved!" }); }} className="btn-premium">
-                  Save
-                </Button>
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Your local ML server URL. Default: http://localhost:8000.
-              </p>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Upload */}
         {!result && (
@@ -227,32 +119,18 @@ const Evaluate = () => {
           </motion.div>
         )}
 
-        {/* Verifying overlay */}
-        {verifying && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="my-4">
-            <Card className="glass-card border-primary/30 orange-glow">
-              <CardContent className="flex items-center gap-3 py-4">
-                <div className="orange-spinner h-5 w-5" />
-                <p className="text-sm font-medium text-foreground">AI is cross-checking results with the photo...</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
         {/* Results Dashboard */}
         {result && (
           <motion.div className="space-y-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             {/* Back + actions */}
             <div className="flex items-center justify-between">
-              <Button variant="ghost" className="text-muted-foreground hover:text-foreground" onClick={() => { setResult(null); setImage(null); setImagePreview(null); setIsVerified(false); setCorrectionsSummary(null); }}>
+              <Button variant="ghost" className="text-muted-foreground hover:text-foreground" onClick={() => { setResult(null); setImage(null); setImagePreview(null); }}>
                 ← New Analysis
               </Button>
               <div className="flex gap-2">
-                {isVerified && (
-                  <Badge variant="secondary" className="gap-1.5 bg-green-500/10 text-green-600 border-green-500/30">
-                    <ShieldCheck className="h-3.5 w-3.5" /> AI Verified
-                  </Badge>
-                )}
+                <Badge variant="secondary" className="gap-1.5 bg-green-500/10 text-green-600 border-green-500/30">
+                  <Sparkles className="h-3.5 w-3.5" /> AI Powered
+                </Badge>
                 {user && (
                   <Button variant="outline" size="sm" className="border-border/50 hover:border-primary/30" onClick={async () => {
                     try {
@@ -285,14 +163,14 @@ const Evaluate = () => {
               </div>
             </div>
 
-            {/* AI Corrections Summary */}
-            {correctionsSummary && (
+            {/* AI Summary */}
+            {result.ai_summary && (
               <Card className="glass-card border-primary/20 orange-glow">
                 <CardContent className="flex gap-3 pt-6">
-                  <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                  <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                   <div>
-                    <p className="text-sm font-medium text-foreground">AI Verification Notes</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{correctionsSummary}</p>
+                    <p className="text-sm font-medium text-foreground">AI Analysis Summary</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{result.ai_summary}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -316,7 +194,7 @@ const Evaluate = () => {
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Eye className="h-4 w-4" /> Brightness
                   </div>
-                  <p className="mt-2 font-display text-4xl font-bold text-foreground">{getBrightness(result)}<span className="text-lg text-muted-foreground">%</span></p>
+                  <p className="mt-2 font-display text-4xl font-bold text-foreground">{typeof getBrightness(result) === 'number' && getBrightness(result) <= 1 ? Math.round(getBrightness(result) * 100) : getBrightness(result)}<span className="text-lg text-muted-foreground">%</span></p>
                 </CardContent>
               </Card>
               <Card className="glass-card-static">

@@ -1,20 +1,9 @@
 // ==============================================================
-// API service — mirrors main.py backend endpoints
+// API service — routes all calls through Supabase edge functions
+// (which proxy to Lovable AI Gateway)
 // ==============================================================
 
-const DEFAULT_API_URL = "http://localhost:8080";
-
-export function getBackendUrl(): string {
-  return localStorage.getItem("roomy_backend_url") || DEFAULT_API_URL;
-}
-
-export function setBackendUrl(url: string) {
-  localStorage.setItem("roomy_backend_url", url.replace(/\/+$/, ""));
-}
-
-// Legacy aliases
-export const getHfSpacesUrl = getBackendUrl;
-export const setHfSpacesUrl = setBackendUrl;
+import { supabase } from "@/integrations/supabase/client";
 
 // ==============================================================
 // Types matching main.py responses
@@ -53,10 +42,8 @@ export interface AnalysisResult {
 }
 
 export interface GenerationResult {
-  image_b64: string;
-  prompt_used: string;
-  style: string;
-  elapsed_s: number;
+  image_url: string | null;
+  description: string;
 }
 
 export interface ChatResult {
@@ -64,10 +51,9 @@ export interface ChatResult {
   action: string;
   style_prompt: string;
   suggested_style: string;
-  image_b64?: string;
-  style_used?: string;
+  image_url?: string | null;
   generation_error?: string;
-  elapsed_s: number;
+  elapsed_s?: number;
 }
 
 export interface FloorPlanAnalysisResult {
@@ -76,141 +62,279 @@ export interface FloorPlanAnalysisResult {
 }
 
 export interface FloorPlanGenerateResult {
-  image_b64: string;
+  image_url: string | null;
   description: string;
-  prompt_used: string;
-  style: string;
-  elapsed_s: number;
-}
-
-export interface HealthResult {
-  status: string;
-  device: string;
-  models_loaded: boolean;
-  model_count: number;
 }
 
 // ==============================================================
-// Helper
+// Helper — convert File to base64 data URL
 // ==============================================================
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = `${getBackendUrl()}${path}`;
-  const resp = await fetch(url, init);
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`API ${resp.status}: ${text || resp.statusText}`);
-  }
-  return resp.json();
+async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 // ==============================================================
-// Endpoints
+// Style constants (matches main.py STYLE_PROMPTS)
 // ==============================================================
 
-/** GET /health */
-export async function checkHealth(): Promise<HealthResult> {
-  return apiFetch("/health");
+const STYLE_PROMPTS: Record<string, string> = {
+  minimalist: "minimalist interior, clean lines, neutral palette, uncluttered, calm atmosphere",
+  luxury: "luxury interior, gold accents, marble surfaces, high-end furniture, chandeliers",
+  scandinavian: "scandinavian interior, white walls, light wood, cozy textiles, hygge aesthetic",
+  modern: "modern interior, sleek furniture, open plan, geometric shapes, neutral tones",
+  industrial: "industrial interior, exposed brick, metal pipes, raw concrete, Edison bulbs",
+  bohemian: "bohemian interior, colorful textiles, indoor plants, eclectic layered decor",
+  mediterranean: "mediterranean interior, terracotta tiles, arched doorways, blue and white palette",
+  japandi: "japandi interior, wabi-sabi, natural materials, muted earth tones, zen simplicity",
+};
+
+export function getStyles(): { styles: string[] } {
+  return { styles: Object.keys(STYLE_PROMPTS) };
 }
 
-/** GET /styles */
-export async function getStyles(): Promise<{ styles: string[] }> {
-  return apiFetch("/styles");
-}
+// ==============================================================
+// Room Analysis — via gemini-ai vision
+// ==============================================================
 
-/** POST /analyze — room photo → full analysis */
 export async function analyzeRoom(imageFile: File): Promise<AnalysisResult> {
-  const fd = new FormData();
-  fd.append("file", imageFile);
-  return apiFetch("/analyze", { method: "POST", body: fd });
+  const imageBase64 = await fileToBase64(imageFile);
+
+  const prompt = `You are an expert interior designer analyzing a room photo. Analyze this room image and return ONLY valid JSON with this exact schema:
+{
+  "objects": [{"name": "sofa", "confidence": 0.95, "bbox": [], "material": "fabric", "source": "AI"}],
+  "lighting": {"brightness": 0.65, "natural_light": true, "warm_tone": true, "saturation": 0.45},
+  "aesthetic_score": 7.2,
+  "design_metrics": {},
+  "recommendations": ["Add layered lighting for better ambiance"],
+  "style_traits": {"lighting": "warm", "palette": "muted", "density": "balanced", "texture": "mixed", "geometry": "mixed", "contrast": "medium"},
+  "possible_styles": ["modern", "scandinavian"],
+  "style_match_scores": {"modern": 0.71, "scandinavian": 0.82},
+  "color_palette": ["beige", "white", "oak wood"],
+  "best_style_upgrade": "scandinavian",
+  "ai_summary": "A moderately styled modern living room with good natural light."
 }
 
-/** POST /design/repaint — image + prompt → redesigned room */
+Rules:
+- aesthetic_score is 0-10
+- confidence is 0-1
+- style_match_scores values are 0-1
+- brightness is 0-1
+- Identify ALL visible furniture/objects
+- Give 3-5 specific actionable recommendations
+- Return ONLY JSON, no markdown`;
+
+  const { data, error } = await supabase.functions.invoke("gemini-ai", {
+    body: { action: "vision", prompt, imageBase64 },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+
+  const rawText = data.text || "{}";
+  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+  const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+
+  // Ensure required fields exist
+  const result: AnalysisResult = {
+    objects: parsed.objects || [],
+    lighting: parsed.lighting || { brightness: 0.5, natural_light: true, warm_tone: true, saturation: 0.4 },
+    aesthetic_score: parsed.aesthetic_score ?? 5,
+    design_metrics: parsed.design_metrics || {},
+    recommendations: parsed.recommendations || [],
+    style_traits: parsed.style_traits || {},
+    possible_styles: parsed.possible_styles || [],
+    style_match_scores: parsed.style_match_scores || {},
+    color_palette: parsed.color_palette || [],
+    best_style_upgrade: parsed.best_style_upgrade || "",
+    ai_summary: parsed.ai_summary || "",
+    analysis_source: "lovable-ai",
+  };
+
+  // Build legacy fields
+  result.brightness = Math.round((result.lighting.brightness ?? 0.5) * 100);
+  if (result.style_match_scores) {
+    result.top_styles = Object.entries(result.style_match_scores)
+      .map(([style, score]) => ({ style, score: score as number }))
+      .sort((a, b) => b.score - a.score);
+  }
+
+  return result;
+}
+
+// ==============================================================
+// Design Repaint — via gemini-ai generate-image
+// ==============================================================
+
 export async function repaintRoom(
   imageFile: File,
   prompt: string,
   style = "modern",
-  strength = 0.72,
-  steps = 30,
-  guidance = 7.5,
 ): Promise<GenerationResult> {
-  const fd = new FormData();
-  fd.append("file", imageFile);
-  fd.append("prompt", prompt);
-  fd.append("style", style);
-  fd.append("strength", String(strength));
-  fd.append("steps", String(steps));
-  fd.append("guidance", String(guidance));
-  return apiFetch("/design/repaint", { method: "POST", body: fd });
+  const imageBase64 = await fileToBase64(imageFile);
+  const styleTag = STYLE_PROMPTS[style] || STYLE_PROMPTS.modern;
+  const fullPrompt = `Redesign this room: ${prompt}. Style: ${styleTag}. Photorealistic interior design photography, 4k, high detail, professional lighting, wide angle lens.`;
+
+  const { data, error } = await supabase.functions.invoke("gemini-ai", {
+    body: { action: "generate-image", prompt: fullPrompt, imageBase64 },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return { image_url: data.image_url || null, description: data.description || "" };
 }
 
-/** POST /design/generate — text + style → room image */
+// ==============================================================
+// Design Generate (text only) — via gemini-ai generate-image
+// ==============================================================
+
 export async function generateRoom(
   prompt: string,
   style = "modern",
-  steps = 25,
-  guidance = 7.5,
-  size = 512,
 ): Promise<GenerationResult> {
-  const fd = new FormData();
-  fd.append("prompt", prompt);
-  fd.append("style", style);
-  fd.append("steps", String(steps));
-  fd.append("guidance", String(guidance));
-  fd.append("size", String(size));
-  return apiFetch("/design/generate", { method: "POST", body: fd });
+  const styleTag = STYLE_PROMPTS[style] || STYLE_PROMPTS.modern;
+  const fullPrompt = `Interior design photography: ${prompt}. ${styleTag}. Photorealistic, 4k, high detail, professional lighting, wide angle lens.`;
+
+  const { data, error } = await supabase.functions.invoke("gemini-ai", {
+    body: { action: "generate-image", prompt: fullPrompt },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return { image_url: data.image_url || null, description: data.description || "" };
 }
 
-/** POST /design/chat — intelligent design chat */
+// ==============================================================
+// Design Chat — via gemini-ai chat
+// ==============================================================
+
 export async function designChat(
   message: string,
-  sessionId = "default",
-  includeAnalysis = false,
-  analysisJson = "",
+  _sessionId = "default",
+  _includeAnalysis = false,
+  _analysisJson = "",
 ): Promise<ChatResult> {
-  const fd = new FormData();
-  fd.append("message", message);
-  fd.append("session_id", sessionId);
-  fd.append("include_analysis", String(includeAnalysis));
-  fd.append("analysis_json", analysisJson);
-  return apiFetch("/design/chat", { method: "POST", body: fd });
+  const systemPrompt = `You are an expert AI interior design assistant for the Roomy Buddy app.
+You help users with interior design advice, room styling, and redesign suggestions.
+When a user asks for a redesign or makeover, set action to "generate" and provide a detailed style_prompt.
+Always respond with valid JSON:
+{
+  "response": "Your helpful advice here",
+  "action": "none or generate",
+  "style_prompt": "detailed prompt if action=generate, otherwise empty",
+  "suggested_style": "one of: minimalist, luxury, scandinavian, modern, industrial, bohemian, mediterranean, japandi"
+}`;
+
+  const { data, error } = await supabase.functions.invoke("gemini-ai", {
+    body: {
+      action: "chat",
+      messages: [{ role: "user", content: message }],
+      systemPrompt,
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+
+  const rawText = data.text || "";
+
+  // Try to parse as JSON
+  try {
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        response: parsed.response || parsed.reply || rawText,
+        action: parsed.action || "none",
+        style_prompt: parsed.style_prompt || "",
+        suggested_style: parsed.suggested_style || "modern",
+      };
+    }
+  } catch {
+    // Not JSON, return as plain text
+  }
+
+  return {
+    response: rawText,
+    action: "none",
+    style_prompt: "",
+    suggested_style: "modern",
+  };
 }
 
-/** POST /design/enhance_prompt */
+// ==============================================================
+// Enhance Prompt — via gemini-ai chat
+// ==============================================================
+
 export async function enhancePrompt(
   userStyle: string,
   evaluationJson = "{}",
 ): Promise<{ enhanced_prompt: string }> {
-  const fd = new FormData();
-  fd.append("user_style", userStyle);
-  fd.append("evaluation_json", evaluationJson);
-  return apiFetch("/design/enhance_prompt", { method: "POST", body: fd });
+  const { data, error } = await supabase.functions.invoke("gemini-ai", {
+    body: {
+      action: "chat",
+      messages: [{
+        role: "user",
+        content: `Generate an optimized Stable Diffusion prompt for: "${userStyle}". Context: ${evaluationJson}. Return ONLY the prompt string, max 100 words.`,
+      }],
+      systemPrompt: "You are a prompt engineer specializing in interior design image generation. Return ONLY the optimized prompt, no explanation.",
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return { enhanced_prompt: data.text || `${userStyle} interior, photorealistic, professional lighting, 4k` };
 }
 
-/** POST /floorplan/analyze */
+// ==============================================================
+// Floor Plan Analysis — via analyze-floorplan edge function
+// ==============================================================
+
 export async function analyzeFloorplan(
   imageFile: File,
-  question?: string,
+  _question?: string,
 ): Promise<FloorPlanAnalysisResult> {
-  const fd = new FormData();
-  fd.append("file", imageFile);
-  if (question) fd.append("question", question);
-  return apiFetch("/floorplan/analyze", { method: "POST", body: fd });
+  const imageBase64 = await fileToBase64(imageFile);
+
+  const { data, error } = await supabase.functions.invoke("analyze-floorplan", {
+    body: { imageBase64, format: "floorplan-analysis" },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+
+  // The edge function returns FloorPlanAnalysis directly
+  return { analysis: JSON.stringify(data), elapsed_s: 0 };
 }
 
-/** POST /floorplan/generate-room */
+// ==============================================================
+// Floor Plan Generate Room — via generate-floorplan edge function
+// ==============================================================
+
 export async function generateFloorplanRoom(
   imageFile: File,
   room = "living room",
   style = "modern",
-  steps = 25,
 ): Promise<FloorPlanGenerateResult> {
-  const fd = new FormData();
-  fd.append("file", imageFile);
-  fd.append("room", room);
-  fd.append("style", style);
-  fd.append("steps", String(steps));
-  return apiFetch("/floorplan/generate-room", { method: "POST", body: fd });
+  const imageBase64 = await fileToBase64(imageFile);
+
+  const { data, error } = await supabase.functions.invoke("generate-floorplan", {
+    body: {
+      analysisData: { rooms: [{ label: room, estimatedSqFt: 200 }], totalArea: 1000, score: 7 },
+      aiSuggestions: [],
+      userSuggestions: `Focus on the ${room} in ${style} style`,
+      imageBase64,
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return { image_url: data.image_url || null, description: data.description || "" };
 }
 
 // ==============================================================
@@ -219,13 +343,13 @@ export async function generateFloorplanRoom(
 
 export function getMockResult(): AnalysisResult {
   return {
-    aesthetic_score: 0.72,
+    aesthetic_score: 7.2,
     lighting: { brightness: 0.65, natural_light: true, warm_tone: true, saturation: 0.45 },
     brightness: 65,
     objects: [
-      { name: "sofa", confidence: 0.95, bbox: [], material: "fabric", source: "YOLO" },
-      { name: "table", confidence: 0.89, bbox: [], material: "wood", source: "YOLO" },
-      { name: "lamp", confidence: 0.82, bbox: [], material: "metal", source: "YOLO" },
+      { name: "sofa", confidence: 0.95, bbox: [], material: "fabric", source: "AI" },
+      { name: "table", confidence: 0.89, bbox: [], material: "wood", source: "AI" },
+      { name: "lamp", confidence: 0.82, bbox: [], material: "metal", source: "AI" },
     ],
     style_traits: { lighting: "warm", palette: "muted", density: "balanced", texture: "mixed", geometry: "mixed", contrast: "medium" },
     possible_styles: ["modern", "scandinavian"],

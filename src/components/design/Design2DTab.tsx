@@ -7,12 +7,12 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Upload, Wand2, Download, Loader2, Send, Bot, User, Save, Settings,
+  Upload, Wand2, Download, Loader2, Send, Bot, User, Save,
 } from "lucide-react";
 import { saveDesign } from "@/lib/designs";
 import { cn } from "@/lib/utils";
 import {
-  repaintRoom, designChat, getBackendUrl, setBackendUrl,
+  repaintRoom, designChat,
   type ChatResult,
 } from "@/services/api";
 
@@ -47,13 +47,11 @@ const Design2DTab = () => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [roomType, setRoomType] = useState("Living Room");
   const [selectedStyle, setSelectedStyle] = useState("modern");
-  const [generatedImageB64, setGeneratedImageB64] = useState<string | null>(null);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [inputMessage, setInputMessage] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
-  const [backendUrl, setBackendUrlState] = useState(getBackendUrl());
 
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
     { role: "ai", content: "Hi 👋 Upload a room photo, select a style, and click Redesign — or ask me for design advice!" },
@@ -74,7 +72,7 @@ const Design2DTab = () => {
     if (!file) return;
     setCurrentImage(file);
     setImagePreview(URL.createObjectURL(file));
-    setGeneratedImageB64(null);
+    setGeneratedImageUrl(null);
     addMessage("ai", "📸 Room photo uploaded! Select a style and click Redesign, or tell me what to change.");
   };
 
@@ -94,9 +92,12 @@ const Design2DTab = () => {
         buildPrompt(extraNotes),
         selectedStyle,
       );
-      const imgUrl = `data:image/png;base64,${result.image_b64}`;
-      setGeneratedImageB64(imgUrl);
-      addMessage("ai", `Here is your ${STYLES.find(s => s.id === selectedStyle)?.label} redesign 👇`, imgUrl);
+      if (result.image_url) {
+        setGeneratedImageUrl(result.image_url);
+        addMessage("ai", `Here is your ${STYLES.find(s => s.id === selectedStyle)?.label} redesign 👇`, result.image_url);
+      } else {
+        addMessage("ai", `Design description: ${result.description}`);
+      }
     } catch (err: any) {
       addMessage("ai", `❌ Generation failed: ${err.message}`);
       toast({ title: "Generation failed", description: err.message, variant: "destructive" });
@@ -122,40 +123,39 @@ const Design2DTab = () => {
     try {
       const result: ChatResult = await designChat(msg);
 
-      if (result.action === "generate" && result.image_b64) {
-        const imgUrl = `data:image/png;base64,${result.image_b64}`;
-        setGeneratedImageB64(imgUrl);
-        addMessage("ai", result.response, imgUrl);
+      if (result.action === "generate" && result.image_url) {
+        setGeneratedImageUrl(result.image_url);
+        addMessage("ai", result.response, result.image_url);
       } else {
         addMessage("ai", result.response);
       }
     } catch {
-      addMessage("ai", "Couldn't reach the backend. Make sure the server is running.");
+      addMessage("ai", "Couldn't reach the AI service. Please try again.");
     }
     setIsTyping(false);
   };
 
   const handleDownload = () => {
-    if (!generatedImageB64) return;
+    if (!generatedImageUrl) return;
     const a = document.createElement("a");
-    a.href = generatedImageB64;
+    a.href = generatedImageUrl;
     a.download = `redesign-${Date.now()}.png`;
     a.click();
   };
 
   const handleSave = async () => {
-    if (!generatedImageB64) return;
+    if (!generatedImageUrl) return;
     setIsSaving(true);
     try {
       await saveDesign({
         type: "2d",
         name: `${roomType} – ${STYLES.find(s => s.id === selectedStyle)?.label}`,
-        thumbnail_url: generatedImageB64,
+        thumbnail_url: generatedImageUrl,
         data: {
           roomType,
           style: selectedStyle,
           originalImage: imagePreview,
-          generatedImage: generatedImageB64,
+          generatedImage: generatedImageUrl,
         },
       });
       toast({ title: "Design saved!" });
@@ -169,37 +169,6 @@ const Design2DTab = () => {
     <div className="flex flex-col lg:flex-row gap-4 h-full">
       {/* LEFT PANEL */}
       <div className="w-full lg:w-80 space-y-4 shrink-0">
-        {/* Backend settings */}
-        <Card>
-          <CardContent className="p-3">
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full"
-            >
-              <Settings className="w-3.5 h-3.5" />
-              Backend: {backendUrl}
-            </button>
-            {showSettings && (
-              <div className="mt-2 flex gap-2">
-                <input
-                  type="text"
-                  value={backendUrl}
-                  onChange={(e) => setBackendUrlState(e.target.value)}
-                  className="flex-1 text-xs border border-border rounded px-2 py-1 bg-muted/50 text-foreground"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => { setBackendUrl(backendUrl); toast({ title: "Saved!" }); }}
-                  className="text-xs"
-                >
-                  Save
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
         {/* Upload */}
         <Card>
           <CardContent className="p-3">
@@ -280,7 +249,7 @@ const Design2DTab = () => {
               )}
             </div>
 
-            {generatedImageB64 && (
+            {generatedImageUrl && (
               <div className="flex gap-2 mb-3 justify-center">
                 <Button size="sm" variant="outline" onClick={handleSave} disabled={isSaving}>
                   <Save className="w-4 h-4 mr-1" /> {isSaving ? "Saving..." : "Save"}
