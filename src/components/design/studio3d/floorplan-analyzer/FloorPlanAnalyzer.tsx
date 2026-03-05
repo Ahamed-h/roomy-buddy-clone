@@ -6,7 +6,7 @@ import { InsightsPanel, LegendPanel, EditPanel } from "./SidePanels";
 import { analyzeFloorplan } from "./analyzeFloorplan";
 import type { AnalyzedRoom, FloorPlanAnalysis } from "./types";
 import { ROOM_COLORS } from "./types";
-import { supabase } from "@/integrations/supabase/client";
+import { generateFloorplanRoom } from "@/services/api";
 
 type Step = "upload" | "analyzing" | "results" | "generating" | "generated";
 
