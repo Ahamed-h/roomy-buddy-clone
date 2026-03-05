@@ -53,18 +53,24 @@ const MidasReconstruction = () => {
     if (!imageFile) return;
     setIsProcessing(true);
     try {
-      const url = getHfSpacesUrl();
-      const formData = new FormData();
-      formData.append("file", imageFile);
-
-      const response = await fetch(`${url}/analyze`, {
-        method: "POST",
-        body: formData,
+      // Use gemini-ai vision to describe the depth/3D structure
+      const reader = new FileReader();
+      const imageBase64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(imageFile);
       });
 
-      if (!response.ok) throw new Error(`MiDaS analysis failed: ${response.status}`);
+      const { data, error } = await supabase.functions.invoke("gemini-ai", {
+        body: {
+          action: "vision",
+          prompt: "Analyze this room image for depth estimation. Describe the spatial layout, distances of objects from the camera, and depth layers visible in the scene.",
+          imageBase64,
+        },
+      });
 
-      const result = await response.json();
+      if (error) throw error;
+      const result = data;
 
       if (result.depth_map && result.depth_map.length > 0) {
         setDepthMap(result.depth_map);
