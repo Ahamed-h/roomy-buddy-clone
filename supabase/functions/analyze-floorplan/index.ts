@@ -262,6 +262,7 @@ async function tryLovableVision(imageBase64: string, apiKey: string): Promise<an
       },
       body: JSON.stringify({
         model: "google/gemini-2.5-pro",
+        messages: [
           { role: "system", content: FLOORPLAN_ANALYSIS_PROMPT },
           {
             role: "user",
