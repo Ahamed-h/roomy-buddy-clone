@@ -1,122 +1,242 @@
-// API service for local ML server and edge functions
+// ==============================================================
+// API service — mirrors main.py backend endpoints
+// ==============================================================
 
-const DEFAULT_API_URL = "http://localhost:8000";
+const DEFAULT_API_URL = "http://localhost:8080";
 
-export function getHfSpacesUrl(): string {
-  return localStorage.getItem("roomform_hf_url") || DEFAULT_API_URL;
+export function getBackendUrl(): string {
+  return localStorage.getItem("roomy_backend_url") || DEFAULT_API_URL;
 }
 
-export function setHfSpacesUrl(url: string) {
-  localStorage.setItem("roomform_hf_url", url);
+export function setBackendUrl(url: string) {
+  localStorage.setItem("roomy_backend_url", url.replace(/\/+$/, ""));
 }
 
-// Response from /analyze endpoint
+// Legacy aliases
+export const getHfSpacesUrl = getBackendUrl;
+export const setHfSpacesUrl = setBackendUrl;
+
+// ==============================================================
+// Types matching main.py responses
+// ==============================================================
+
+export interface DetectedObject {
+  name: string;
+  confidence: number;
+  bbox: number[];
+  material?: string;
+  source: string;
+}
+
 export interface AnalysisResult {
+  objects: DetectedObject[];
+  lighting: {
+    brightness: number;
+    natural_light: boolean;
+    warm_tone: boolean;
+    saturation: number;
+  };
   aesthetic_score: number;
-  lighting: { brightness: number };
-  objects: Array<{
-    name: string;
-    confidence: number;
-    material: string;
-    distance_m: number;
-    source: string;
-  }>;
-  style_traits: Record<string, number>;
+  design_metrics: Record<string, number>;
+  recommendations: string[];
+  style_traits: Record<string, string>;
   possible_styles: string[];
   style_match_scores: Record<string, number>;
-  depth_map: number[][];
-  recommendations: string[];
-  // Legacy fields for backwards compat
+  color_palette?: string[];
+  best_style_upgrade?: string;
+  ai_summary?: string;
+  analysis_source?: string;
+  elapsed_s?: number;
+  // Legacy compat
   brightness?: number;
   top_styles?: Array<{ style: string; score: number }>;
-  design_metrics?: Record<string, number>;
-  material_distribution?: Record<string, number>;
 }
 
-export async function analyzeRoom(imageFile: File): Promise<AnalysisResult> {
-  const url = getHfSpacesUrl();
-  const formData = new FormData();
-  formData.append("file", imageFile);
+export interface GenerationResult {
+  image_b64: string;
+  prompt_used: string;
+  style: string;
+  elapsed_s: number;
+}
 
-  const response = await fetch(`${url}/analyze`, {
-    method: "POST",
-    body: formData,
-  });
+export interface ChatResult {
+  response: string;
+  action: string;
+  style_prompt: string;
+  suggested_style: string;
+  image_b64?: string;
+  style_used?: string;
+  generation_error?: string;
+  elapsed_s: number;
+}
 
-  if (!response.ok) {
-    throw new Error(`Analysis failed: ${response.status} ${response.statusText}`);
+export interface FloorPlanAnalysisResult {
+  analysis: string;
+  elapsed_s: number;
+}
+
+export interface FloorPlanGenerateResult {
+  image_b64: string;
+  description: string;
+  prompt_used: string;
+  style: string;
+  elapsed_s: number;
+}
+
+export interface HealthResult {
+  status: string;
+  device: string;
+  models_loaded: boolean;
+  model_count: number;
+}
+
+// ==============================================================
+// Helper
+// ==============================================================
+
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = `${getBackendUrl()}${path}`;
+  const resp = await fetch(url, init);
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`API ${resp.status}: ${text || resp.statusText}`);
   }
-
-  return response.json();
+  return resp.json();
 }
 
-// Mock result for demo / when backend isn't connected
+// ==============================================================
+// Endpoints
+// ==============================================================
+
+/** GET /health */
+export async function checkHealth(): Promise<HealthResult> {
+  return apiFetch("/health");
+}
+
+/** GET /styles */
+export async function getStyles(): Promise<{ styles: string[] }> {
+  return apiFetch("/styles");
+}
+
+/** POST /analyze — room photo → full analysis */
+export async function analyzeRoom(imageFile: File): Promise<AnalysisResult> {
+  const fd = new FormData();
+  fd.append("file", imageFile);
+  return apiFetch("/analyze", { method: "POST", body: fd });
+}
+
+/** POST /design/repaint — image + prompt → redesigned room */
+export async function repaintRoom(
+  imageFile: File,
+  prompt: string,
+  style = "modern",
+  strength = 0.72,
+  steps = 30,
+  guidance = 7.5,
+): Promise<GenerationResult> {
+  const fd = new FormData();
+  fd.append("file", imageFile);
+  fd.append("prompt", prompt);
+  fd.append("style", style);
+  fd.append("strength", String(strength));
+  fd.append("steps", String(steps));
+  fd.append("guidance", String(guidance));
+  return apiFetch("/design/repaint", { method: "POST", body: fd });
+}
+
+/** POST /design/generate — text + style → room image */
+export async function generateRoom(
+  prompt: string,
+  style = "modern",
+  steps = 25,
+  guidance = 7.5,
+  size = 512,
+): Promise<GenerationResult> {
+  const fd = new FormData();
+  fd.append("prompt", prompt);
+  fd.append("style", style);
+  fd.append("steps", String(steps));
+  fd.append("guidance", String(guidance));
+  fd.append("size", String(size));
+  return apiFetch("/design/generate", { method: "POST", body: fd });
+}
+
+/** POST /design/chat — intelligent design chat */
+export async function designChat(
+  message: string,
+  sessionId = "default",
+  includeAnalysis = false,
+  analysisJson = "",
+): Promise<ChatResult> {
+  const fd = new FormData();
+  fd.append("message", message);
+  fd.append("session_id", sessionId);
+  fd.append("include_analysis", String(includeAnalysis));
+  fd.append("analysis_json", analysisJson);
+  return apiFetch("/design/chat", { method: "POST", body: fd });
+}
+
+/** POST /design/enhance_prompt */
+export async function enhancePrompt(
+  userStyle: string,
+  evaluationJson = "{}",
+): Promise<{ enhanced_prompt: string }> {
+  const fd = new FormData();
+  fd.append("user_style", userStyle);
+  fd.append("evaluation_json", evaluationJson);
+  return apiFetch("/design/enhance_prompt", { method: "POST", body: fd });
+}
+
+/** POST /floorplan/analyze */
+export async function analyzeFloorplan(
+  imageFile: File,
+  question?: string,
+): Promise<FloorPlanAnalysisResult> {
+  const fd = new FormData();
+  fd.append("file", imageFile);
+  if (question) fd.append("question", question);
+  return apiFetch("/floorplan/analyze", { method: "POST", body: fd });
+}
+
+/** POST /floorplan/generate-room */
+export async function generateFloorplanRoom(
+  imageFile: File,
+  room = "living room",
+  style = "modern",
+  steps = 25,
+): Promise<FloorPlanGenerateResult> {
+  const fd = new FormData();
+  fd.append("file", imageFile);
+  fd.append("room", room);
+  fd.append("style", style);
+  fd.append("steps", String(steps));
+  return apiFetch("/floorplan/generate-room", { method: "POST", body: fd });
+}
+
+// ==============================================================
+// Mock data for demo / offline
+// ==============================================================
+
 export function getMockResult(): AnalysisResult {
   return {
-    aesthetic_score: 7.2,
-    lighting: { brightness: 65 },
+    aesthetic_score: 0.72,
+    lighting: { brightness: 0.65, natural_light: true, warm_tone: true, saturation: 0.45 },
     brightness: 65,
     objects: [
-      { name: "sofa", confidence: 0.95, material: "fabric", distance_m: 2.3, source: "YOLO" },
-      { name: "table", confidence: 0.89, material: "wood", distance_m: 1.8, source: "YOLO" },
-      { name: "lamp", confidence: 0.82, material: "metal", distance_m: 3.1, source: "OWL-ViT" },
-      { name: "rug", confidence: 0.78, material: "fabric", distance_m: 1.5, source: "OWL-ViT" },
-      { name: "window", confidence: 0.91, material: "glass", distance_m: 4.0, source: "OWL-ViT" },
-      { name: "cabinet", confidence: 0.85, material: "wood", distance_m: 2.7, source: "YOLO" },
+      { name: "sofa", confidence: 0.95, bbox: [], material: "fabric", source: "YOLO" },
+      { name: "table", confidence: 0.89, bbox: [], material: "wood", source: "YOLO" },
+      { name: "lamp", confidence: 0.82, bbox: [], material: "metal", source: "YOLO" },
     ],
-    style_traits: {
-      warm_lighting: 0.72,
-      cool_lighting: 0.28,
-      natural_light: 0.65,
-      artificial_light: 0.45,
-      soft_textures: 0.58,
-      hard_surfaces: 0.42,
-      organic_shapes: 0.55,
-      geometric_shapes: 0.48,
-    },
-    possible_styles: ["Scandinavian", "Modern", "Minimalist", "Contemporary", "Mid-Century"],
-    style_match_scores: {
-      Scandinavian: 0.82,
-      Modern: 0.71,
-      Minimalist: 0.65,
-      Contemporary: 0.58,
-      "Mid-Century": 0.45,
-    },
-    top_styles: [
-      { style: "Scandinavian", score: 0.82 },
-      { style: "Modern", score: 0.71 },
-      { style: "Minimalist", score: 0.65 },
-      { style: "Contemporary", score: 0.58 },
-      { style: "Mid-Century", score: 0.45 },
-    ],
-    depth_map: [],
-    design_metrics: {
-      color_harmony: 7.5,
-      contrast_balance: 6.8,
-      lighting_quality: 7.2,
-      light_temperature: 6.5,
-      spatial_balance: 7.0,
-      alignment_order: 6.9,
-      negative_space: 7.3,
-      visual_comfort: 7.1,
-      clutter_control: 6.7,
-      material_quality: 7.4,
-      texture_depth: 6.6,
-      design_cohesion: 7.2,
-      visual_hierarchy: 6.8,
-    },
-    material_distribution: {
-      fabric: 35,
-      wood: 28,
-      metal: 15,
-      glass: 12,
-      plastic: 10,
-    },
+    style_traits: { lighting: "warm", palette: "muted", density: "balanced", texture: "mixed", geometry: "mixed", contrast: "medium" },
+    possible_styles: ["modern", "scandinavian"],
+    style_match_scores: { modern: 0.71, scandinavian: 0.82, minimalist: 0.65 },
+    design_metrics: {},
     recommendations: [
-      "Add a warm accent light near the reading area to improve lighting balance",
-      "Consider a textured throw pillow to add visual depth to the sofa",
-      "The color palette works well — consider adding a subtle accent color for visual interest",
-      "Room has good spatial balance. A small plant could enhance the organic feel",
+      "Add layered lighting for better ambiance",
+      "Consider adding texture variety with throw pillows",
     ],
+    color_palette: ["beige", "white", "oak wood"],
+    ai_summary: "A moderately styled modern living room with good natural light.",
+    analysis_source: "mock",
   };
 }
