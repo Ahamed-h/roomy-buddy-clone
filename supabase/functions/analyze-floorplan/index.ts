@@ -6,7 +6,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ─── RasterScan (Primary) ───────────────────────────────────────────────
+const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+
+// ─── RasterScan (Primary — free CV model) ───────────────────────────────
 
 const RASTERSCAN_GRADIO_URL =
   "https://rasterscan-automated-floor-plan-digitalization.hf.space";
@@ -105,14 +107,13 @@ async function tryRasterScan(imageBase64: string): Promise<any | null> {
   }
 }
 
-// Convert RasterScan result to FloorPlanAnalysis format (percentage-based rooms)
+// Convert RasterScan result to FloorPlanAnalysis format
 function rasterScanToFloorPlanAnalysis(rs: any, imageWidth: number, imageHeight: number): any {
   const rooms: any[] = [];
   const roomTypeGuesses = ["Living Room", "Bedroom", "Kitchen", "Bathroom", "Dining Room", "Office", "Hallway", "Storage", "Laundry", "Balcony", "Garage", "Unknown"];
 
   if (Array.isArray(rs.rooms)) {
     rs.rooms.forEach((r: any, i: number) => {
-      // RasterScan rooms may have bbox [x1, y1, x2, y2] in pixels
       let x = 0, y = 0, width = 20, height = 15;
 
       if (r.bbox && Array.isArray(r.bbox) && r.bbox.length >= 4) {
@@ -121,13 +122,11 @@ function rasterScanToFloorPlanAnalysis(rs: any, imageWidth: number, imageHeight:
         width = ((r.bbox[2] - r.bbox[0]) / imageWidth) * 100;
         height = ((r.bbox[3] - r.bbox[1]) / imageHeight) * 100;
       } else if (r.center) {
-        // Estimate a room rectangle from center
         x = ((r.center.x || 0) / imageWidth) * 100 - 10;
         y = ((r.center.y || 0) / imageHeight) * 100 - 7.5;
         width = 20;
         height = 15;
       } else if (r.contour && Array.isArray(r.contour) && r.contour.length > 0) {
-        // Derive bbox from contour points
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const pt of r.contour) {
           const px = Array.isArray(pt) ? pt[0] : pt.x || 0;
@@ -145,7 +144,7 @@ function rasterScanToFloorPlanAnalysis(rs: any, imageWidth: number, imageHeight:
 
       const roomName = r.name || r.type || r.label || roomTypeGuesses[i % roomTypeGuesses.length];
       const roomType = matchRoomType(roomName);
-      const sqFt = Math.round((width / 100) * (height / 100) * 1500); // rough estimate
+      const sqFt = Math.round((width / 100) * (height / 100) * 1500);
 
       rooms.push({
         id: `r${i}`,
@@ -196,7 +195,7 @@ function matchRoomType(name: string): string {
   return "Unknown";
 }
 
-// ─── Lovable AI Vision (returns FloorPlanAnalysis format directly) ──────
+// ─── Lovable AI Vision (FloorPlanAnalysis format) ───────────────────────
 
 const FLOORPLAN_ANALYSIS_PROMPT = `You are a senior architectural space planner. Analyse the uploaded floor plan image carefully.
 
@@ -248,27 +247,21 @@ Rules:
 - type must be one of: Living Room, Bedroom, Kitchen, Bathroom, Dining Room, Office, Hallway, Garage, Laundry, Storage, Balcony, Unknown
 - impact must be "high", "medium", or "low"`;
 
-async function tryGeminiVision(imageBase64: string): Promise<any | null> {
-  const GEMINI_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY");
-  if (!GEMINI_KEY) {
-    console.log("No GOOGLE_GEMINI_API_KEY, skipping Gemini vision");
-    return null;
-  }
-
+async function tryLovableVision(imageBase64: string, apiKey: string): Promise<any | null> {
   try {
-    console.log("Trying Gemini vision analysis...");
+    console.log("Trying Lovable AI vision analysis...");
     const imageUrl = imageBase64.startsWith("data:")
       ? imageBase64
       : `data:image/png;base64,${imageBase64}`;
 
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+    const response = await fetch(GATEWAY_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${GEMINI_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gemini-2.5-flash",
+        model: "google/gemini-2.5-flash",
         messages: [
           { role: "system", content: FLOORPLAN_ANALYSIS_PROMPT },
           {
@@ -283,13 +276,13 @@ async function tryGeminiVision(imageBase64: string): Promise<any | null> {
     });
 
     if (!response.ok) {
-      console.error("Gemini vision failed:", response.status, await response.text());
+      console.error("Lovable AI vision failed:", response.status, await response.text());
       return null;
     }
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
-    console.log("Gemini vision raw length:", content.length);
+    console.log("Lovable AI vision raw length:", content.length);
 
     let jsonStr = content;
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -301,18 +294,18 @@ async function tryGeminiVision(imageBase64: string): Promise<any | null> {
 
     const parsed = JSON.parse(jsonStr);
     if (parsed.rooms && Array.isArray(parsed.rooms)) {
-      parsed.source = "gemini";
-      console.log(`Gemini: ${parsed.rooms.length} rooms, score: ${parsed.score}`);
+      parsed.source = "lovable-ai";
+      console.log(`Lovable AI: ${parsed.rooms.length} rooms, score: ${parsed.score}`);
       return parsed;
     }
     return null;
   } catch (err) {
-    console.error("Gemini vision error:", err);
+    console.error("Lovable AI vision error:", err);
     return null;
   }
 }
 
-// ─── Legacy AI Vision Fallback (Gemini/OpenAI direct) ───────────────────
+// ─── Legacy AI Vision Fallback ──────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are an expert architectural floor plan analyzer. Analyze the provided floor plan image and extract ALL structural and furniture elements with precise coordinates.
 
@@ -348,65 +341,26 @@ INSTRUCTIONS:
 6. FURNITURE: All drawn items. Position = center. Realistic dimensions.
 7. ROOMS: Read labels. Center = approximate center.`;
 
-interface AIProvider {
-  url: string;
-  key: string;
-  model: string;
-  name: string;
-}
+async function callLovableAI(apiKey: string, messages: any[]): Promise<any> {
+  console.log("Calling Lovable AI gateway...");
+  const response = await fetch(GATEWAY_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash",
+      messages,
+    }),
+  });
 
-function getProviders(): AIProvider[] {
-  const providers: AIProvider[] = [];
-
-  const geminiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
-  if (geminiKey) {
-    providers.push({
-      url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-      key: geminiKey,
-      model: "gemini-2.5-pro",
-      name: "Gemini",
-    });
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Lovable AI failed [${response.status}]: ${errText}`);
   }
 
-  const openaiKey = Deno.env.get("OPENAI_API_KEY");
-  if (openaiKey) {
-    providers.push({
-      url: "https://api.openai.com/v1/chat/completions",
-      key: openaiKey,
-      model: "gpt-4o",
-      name: "OpenAI",
-    });
-  }
-
-  return providers;
-}
-
-async function callAI(providers: AIProvider[], messages: any[]): Promise<any> {
-  for (const provider of providers) {
-    try {
-      console.log(`Trying ${provider.name}...`);
-      const response = await fetch(provider.url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${provider.key}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ model: provider.model, messages }),
-      });
-
-      if (response.ok) {
-        console.log(`${provider.name} succeeded`);
-        return await response.json();
-      }
-
-      console.error(`${provider.name} failed: ${response.status}`);
-      continue;
-    } catch (err) {
-      console.error(`${provider.name} error:`, err);
-      continue;
-    }
-  }
-  throw new Error("All AI providers failed");
+  return await response.json();
 }
 
 // ─── Main Handler ───────────────────────────────────────────────────────
@@ -417,6 +371,11 @@ serve(async (req) => {
   }
 
   try {
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) {
+      throw new Error("LOVABLE_API_KEY is not configured");
+    }
+
     const { imageBase64, imageWidth, imageHeight, format } = await req.json();
     if (!imageBase64) {
       return new Response(JSON.stringify({ error: "imageBase64 is required" }), {
@@ -425,12 +384,11 @@ serve(async (req) => {
       });
     }
 
-    // New: if format=floorplan-analysis, return FloorPlanAnalysis format directly
     const wantFloorPlanFormat = format === "floorplan-analysis";
     const imgW = imageWidth || 2000;
     const imgH = imageHeight || 1500;
 
-    // ── Strategy 1: RasterScan (free CV model) → convert to FloorPlanAnalysis ──
+    // ── Strategy 1: RasterScan (free CV model) ──
     const rsResult = await tryRasterScan(imageBase64);
     if (rsResult) {
       if (wantFloorPlanFormat) {
@@ -440,7 +398,6 @@ serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      // Legacy format
       const normalized = normalizeRasterScanLegacy(rsResult);
       console.log(`RasterScan legacy: ${normalized.walls.length} walls, ${normalized.rooms.length} rooms`);
       return new Response(JSON.stringify(normalized), {
@@ -448,22 +405,18 @@ serve(async (req) => {
       });
     }
 
-    // ── Strategy 2: Gemini Vision (FloorPlanAnalysis format) ──
+    // ── Strategy 2: Lovable AI Vision (FloorPlanAnalysis format) ──
     if (wantFloorPlanFormat) {
-      const geminiResult = await tryGeminiVision(imageBase64);
-      if (geminiResult) {
-        return new Response(JSON.stringify(geminiResult), {
+      const aiResult = await tryLovableVision(imageBase64, LOVABLE_API_KEY);
+      if (aiResult) {
+        return new Response(JSON.stringify(aiResult), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     }
 
-    // ── Strategy 3: Direct AI Vision (Gemini → OpenAI, legacy format) ──
-    console.log("Falling back to direct AI vision...");
-    const providers = getProviders();
-    if (providers.length === 0) {
-      throw new Error("No analyzers available. RasterScan failed and no AI API keys configured.");
-    }
+    // ── Strategy 3: Lovable AI Vision (legacy format) ──
+    console.log("Falling back to Lovable AI vision (legacy)...");
 
     const imageUrl = imageBase64.startsWith("data:")
       ? imageBase64
@@ -480,7 +433,7 @@ serve(async (req) => {
       },
     ];
 
-    const aiResult = await callAI(providers, messages);
+    const aiResult = await callLovableAI(LOVABLE_API_KEY, messages);
     const content = aiResult.choices?.[0]?.message?.content || "";
     console.log("AI raw response length:", content.length);
 
@@ -639,5 +592,5 @@ function normalizeAIResult(content: string) {
   }));
 
   const allFurniture = [...furniture, ...doors, ...windows];
-  return { walls, furniture: allFurniture, rooms, dimensions, source: "ai-vision" };
+  return { walls, furniture: allFurniture, rooms, dimensions, source: "lovable-ai" };
 }
