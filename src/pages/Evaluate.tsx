@@ -260,7 +260,10 @@ const Evaluate = () => {
                         type: "evaluate",
                         name: `Evaluation – ${new Date().toLocaleDateString()}`,
                         thumbnail_url: imagePreview || null,
-                        data: result as unknown as Record<string, unknown>,
+                        data: {
+                          ...result as unknown as Record<string, unknown>,
+                          originalImage: imagePreview,
+                        },
                       });
                       toast({ title: "Evaluation saved!", description: "View it in your dashboard." });
                     } catch { toast({ title: "Save failed", variant: "destructive" }); }
