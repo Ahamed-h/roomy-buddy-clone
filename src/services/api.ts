@@ -70,7 +70,7 @@ export interface FloorPlanGenerateResult {
 // Helper — convert File to base64 data URL
 // ==============================================================
 
-async function fileToBase64(file: File): Promise<string> {
+export async function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
