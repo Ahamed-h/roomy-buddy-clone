@@ -7,6 +7,7 @@ const corsHeaders = {
 };
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const IMAGE_GEN_MODEL = "google/gemini-3-pro-image-preview";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -63,14 +64,15 @@ Generate a clean, professional 2D architectural floor plan drawing showing the r
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-image",
+        model: IMAGE_GEN_MODEL,
         messages: [{ role: "user", content: contentParts }],
+        modalities: ["image", "text"],
       }),
     });
 
     if (!resp.ok) {
       const errText = await resp.text();
-      console.error("Lovable AI floorplan gen error:", resp.status, errText);
+      console.error("Floorplan gen error:", resp.status, errText);
       if (resp.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -85,22 +87,9 @@ Generate a clean, professional 2D architectural floor plan drawing showing the r
     }
 
     const data = await resp.json();
-    const content = data.choices?.[0]?.message?.content || "";
-
-    let image_url: string | null = null;
-    let description = "";
-
-    if (typeof content === "string") {
-      description = content;
-    } else if (Array.isArray(content)) {
-      for (const part of content) {
-        if (part.type === "image_url" && part.image_url?.url) {
-          image_url = part.image_url.url;
-        } else if (part.type === "text") {
-          description += part.text;
-        }
-      }
-    }
+    const msg = data.choices?.[0]?.message;
+    const description = msg?.content || "";
+    const image_url = msg?.images?.[0]?.image_url?.url || null;
 
     return new Response(JSON.stringify({ image_url, description }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
