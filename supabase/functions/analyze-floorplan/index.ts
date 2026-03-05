@@ -197,7 +197,7 @@ function matchRoomType(name: string): string {
 
 // ─── Lovable AI Vision (FloorPlanAnalysis format) ───────────────────────
 
-const FLOORPLAN_ANALYSIS_PROMPT = `You are a senior architectural space planner. Analyse the uploaded floor plan image carefully.
+const FLOORPLAN_ANALYSIS_PROMPT = `You are a licensed senior architect with 25+ years of residential and commercial design experience. Analyse the uploaded floor plan image with the precision and detail of a professional architectural review.
 
 Return ONLY a single valid JSON object — no markdown, no explanation, nothing else.
 
@@ -213,39 +213,74 @@ Schema:
       "y": 8,
       "width": 30,
       "height": 25,
-      "notes": "Open plan, south-facing"
+      "notes": "Open plan, south-facing, 3.2m ceiling height"
     }
   ],
   "totalArea": 1400,
   "score": 7.2,
-  "summary": "Compact 2BR apartment with efficient layout",
+  "summary": "Compact 2BR apartment with efficient layout but suboptimal kitchen work triangle",
   "insights": [
-    { "type": "positive", "text": "Good separation of wet and dry zones" },
-    { "type": "warning",  "text": "Bedroom 2 has no direct natural light" },
-    { "type": "negative", "text": "Kitchen triangle inefficient" }
+    { "type": "positive", "text": "Excellent separation of public and private zones with central hallway acting as buffer" },
+    { "type": "positive", "text": "Living area benefits from dual-aspect natural light — ideal for passive solar gain" },
+    { "type": "warning",  "text": "Bedroom 2 lacks direct fenestration — fails IRC R303.1 natural light requirement" },
+    { "type": "warning",  "text": "Kitchen work triangle exceeds 26 ft total — NKBA guidelines recommend max 26 ft" },
+    { "type": "negative", "text": "No clear egress path from master bedroom — potential fire safety concern per IBC 1015" },
+    { "type": "negative", "text": "Bathroom door swings into hallway circulation path — ADA clearance compromised" }
   ],
-  "flowIssues": ["Living room acts as through-corridor to bedrooms"],
+  "flowIssues": [
+    "Living room serves as mandatory through-corridor to bedrooms — eliminates private retreat quality",
+    "Kitchen entry forces 180° turn from main hallway — poor wayfinding for guests"
+  ],
   "recommendations": [
     {
       "id": "rec1",
-      "title": "Enlarge Kitchen",
-      "description": "Extend kitchen 4 ft east",
+      "title": "Optimize Kitchen Work Triangle",
+      "description": "Relocate refrigerator to north wall and extend counter 4 ft east to achieve ideal 12-18 ft work triangle. This improves cooking efficiency by 40% per NKBA standards.",
       "impact": "high",
       "roomChanges": [
-        { "id": "r2", "width": 22, "height": 18, "notes": "Expanded kitchen" }
+        { "id": "r2", "width": 22, "height": 18, "notes": "L-shaped layout with island, improved ventilation path" }
+      ]
+    },
+    {
+      "id": "rec2",
+      "title": "Add Pocket Door to En-Suite",
+      "description": "Replace swing door with pocket door to reclaim 9 sq ft of usable floor area and eliminate door-swing conflict with vanity.",
+      "impact": "medium",
+      "roomChanges": []
+    },
+    {
+      "id": "rec3",
+      "title": "Create Visual Connection Between Living & Dining",
+      "description": "Remove non-load-bearing partition wall between living and dining areas. Install a structural beam (LVL 3.5x11.875) to create an open-plan social zone of ~380 sq ft.",
+      "impact": "high",
+      "roomChanges": [
+        { "id": "r0", "width": 45, "height": 25, "notes": "Combined living-dining open plan" }
       ]
     }
   ]
 }
 
-Rules:
+ARCHITECTURAL ANALYSIS RULES:
 - x, y, width, height are PERCENTAGES (0–100) of the image dimensions
-- Only identify rooms clearly visible in the image
-- Do NOT invent rooms that are not visible
+- Only identify rooms clearly visible in the image — do NOT invent rooms
 - Every recommendation roomChange must reference a real room id
-- score is 0–10
+- score is 0–10 (be critical — most residential plans score 5-7)
 - type must be one of: Living Room, Bedroom, Kitchen, Bathroom, Dining Room, Office, Hallway, Garage, Laundry, Storage, Balcony, Unknown
-- impact must be "high", "medium", or "low"`;
+- impact must be "high", "medium", or "low"
+
+PROFESSIONAL EVALUATION CRITERIA (use these in your insights):
+1. CIRCULATION & FLOW: Assess traffic patterns, dead-end corridors, and cross-traffic through private zones
+2. SPATIAL PROPORTIONS: Check room aspect ratios (ideal 1:1.2 to 1:1.6), ceiling-to-floor ratios
+3. NATURAL LIGHT: Evaluate fenestration ratio (15-20% of floor area), light penetration depth (<2.5x window head height)
+4. KITCHEN WORK TRIANGLE: Measure sink-stove-fridge triangle (ideal 12-26 ft total per NKBA)
+5. PRIVACY ZONING: Separate public (living/dining/kitchen) from private (bedrooms/bathrooms) zones
+6. ACCESSIBILITY: Check 36" min doorways, 60" turning radius in bathrooms, 42" kitchen aisles
+7. STRUCTURAL LOGIC: Note load-bearing wall implications in recommendations
+8. VENTILATION & EGRESS: Cross-ventilation potential, emergency exit paths per building codes
+9. STORAGE: Minimum 10% of total area should be dedicated storage (closets, pantry, utility)
+10. ENERGY EFFICIENCY: Orientation, thermal mass placement, HVAC duct routing potential
+
+Provide at least 4-6 insights and 2-4 actionable recommendations with specific measurements.`;
 
 async function tryLovableVision(imageBase64: string, apiKey: string): Promise<any | null> {
   try {

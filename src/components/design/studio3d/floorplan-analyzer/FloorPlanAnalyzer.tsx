@@ -6,7 +6,7 @@ import { InsightsPanel, LegendPanel, EditPanel } from "./SidePanels";
 import { analyzeFloorplan } from "./analyzeFloorplan";
 import type { AnalyzedRoom, FloorPlanAnalysis } from "./types";
 import { ROOM_COLORS } from "./types";
-import { generateFloorplanRoom } from "@/services/api";
+// generateFloorplanRoom is now called directly via supabase.functions.invoke
 
 type Step = "upload" | "analyzing" | "results" | "generating" | "generated";
 
@@ -120,23 +120,29 @@ export default function FloorPlanAnalyzer() {
     setError(null);
 
     try {
-      // Convert data URL to File
-      const resp = await fetch(imgBase64);
-      const blob = await resp.blob();
-      const file = new File([blob], "floorplan.png", { type: blob.type });
+      const { supabase } = await import("@/integrations/supabase/client");
 
-      // Pick the first room type or default
-      const roomLabel = rooms[0]?.label || "living room";
-      const style = "modern";
+      const { data, error: fnError } = await supabase.functions.invoke("generate-floorplan", {
+        body: {
+          analysisData: {
+            rooms,
+            totalArea: analysis.totalArea,
+            score: analysis.score,
+          },
+          aiSuggestions: selectedAiSuggestions,
+          userSuggestions: userSuggestions.trim() || undefined,
+          imageBase64: imgBase64,
+        },
+      });
 
-      const result = await generateFloorplanRoom(file, roomLabel, style);
+      if (fnError) throw fnError;
+      if (data?.error) throw new Error(data.error);
 
-      if (result.image_url) {
-        const imgUrl = result.image_url;
-        setGeneratedImage(imgUrl);
-        setGeneratedDescription(result.description || "");
+      if (data?.image_url) {
+        setGeneratedImage(data.image_url);
+        setGeneratedDescription(data.description || "");
         setStep("generated");
-        toast({ title: "Room Generated!", description: "Your room visualization is ready." });
+        toast({ title: "Floor Plan Generated!", description: "AI-verified architectural redesign is ready." });
       } else {
         throw new Error("No image was generated. Try again.");
       }
@@ -145,7 +151,7 @@ export default function FloorPlanAnalyzer() {
       setStep("results");
       toast({ title: "Generation Failed", description: e.message, variant: "destructive" });
     }
-  }, [analysis, rooms, imgBase64, toast]);
+  }, [analysis, rooms, imgBase64, selectedAiSuggestions, userSuggestions, toast]);
 
   const handleDownload = useCallback(() => {
     if (!generatedImage) return;
