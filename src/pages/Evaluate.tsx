@@ -49,7 +49,7 @@ const Evaluate = () => {
       setResult(data);
       sessionStorage.setItem("aivo_analysis", JSON.stringify(data));
       if (imagePreview) sessionStorage.setItem("aivo_image", imagePreview);
-      toast({ title: "AI Analysis complete!", description: "Room has been analyzed using Lovable AI." });
+      toast({ title: "AI Analysis complete!", description: "Room has been analyzed successfully." });
     } catch (err) {
       console.error("Analysis error:", err);
       toast({
@@ -80,7 +80,7 @@ const Evaluate = () => {
       <div className="container py-12">
         <div className="mb-8">
           <h1 className="font-display text-3xl font-bold text-foreground">AI Room Evaluation</h1>
-          <p className="mt-1 text-muted-foreground">Upload a room photo to analyze with AI — powered by Lovable AI Gateway.</p>
+          <p className="mt-1 text-muted-foreground">Upload a room photo to analyze with AI-powered interior design evaluation.</p>
         </div>
 
         {/* Upload */}
