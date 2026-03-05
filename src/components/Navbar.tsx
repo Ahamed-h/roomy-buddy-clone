@@ -137,8 +137,8 @@ export function Navbar() {
                   </>
                 ) : (
                   <>
-                    <Button variant="ghost" size="sm" onClick={signInWithGoogle}>Sign In with Google</Button>
-                    <Button size="sm" className="btn-premium" onClick={signInWithGoogle}>Get Started</Button>
+                    <Button variant="ghost" size="sm" onClick={() => { setOpen(false); navigate("/auth"); }}>Sign In</Button>
+                    <Button size="sm" className="btn-premium" onClick={() => { setOpen(false); navigate("/auth"); }}>Get Started</Button>
                   </>
                 )}
               </div>
