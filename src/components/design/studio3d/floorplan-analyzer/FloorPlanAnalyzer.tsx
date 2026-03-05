@@ -6,7 +6,7 @@ import { InsightsPanel, LegendPanel, EditPanel } from "./SidePanels";
 import { analyzeFloorplan } from "./analyzeFloorplan";
 import type { AnalyzedRoom, FloorPlanAnalysis } from "./types";
 import { ROOM_COLORS } from "./types";
-import { generateFloorplanRoom } from "@/services/api";
+// generateFloorplanRoom is now called directly via supabase.functions.invoke
 
 type Step = "upload" | "analyzing" | "results" | "generating" | "generated";
 
