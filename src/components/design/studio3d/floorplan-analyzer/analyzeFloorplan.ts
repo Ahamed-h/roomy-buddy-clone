@@ -87,9 +87,12 @@ export async function analyzeFloorplan(imageBase64: string): Promise<FloorPlanAn
   // Fallback: extract rooms from text
   const result: FloorPlanAnalysis = {
     rooms: [],
-    insights: [],
-    recommendations: [],
+    totalArea: 0,
     score: 5,
+    summary: "Analysis from backend",
+    insights: [],
+    flowIssues: [],
+    recommendations: [],
   };
 
   const roomPattern = /(?:bedroom|living\s*room|kitchen|bathroom|dining\s*room|office|hallway|closet|balcony|garage|laundry|entry|foyer|study|nursery|guest\s*room|master\s*(?:bed)?room|utility|storage)/gi;
